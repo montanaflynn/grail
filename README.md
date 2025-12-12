@@ -129,13 +129,8 @@ provider, err := gemini.New(ctx,
 
 - [API Reference](https://pkg.go.dev/github.com/montanaflynn/grail)
 - [Providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers)
-- [Repository](https://github.com/montanaflynn/grail)
 - [Examples](https://github.com/montanaflynn/grail/tree/main/examples)
 - [Changelog](https://github.com/montanaflynn/grail/blob/main/CHANGELOG.md)
-
-## Documentation
-
-- **API Reference**: [pkg.go.dev/github.com/montanaflynn/grail](https://pkg.go.dev/github.com/montanaflynn/grail)
 
 ## Development
 

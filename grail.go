@@ -16,14 +16,11 @@
 // This package provides the core client and interfaces. Provider implementations
 // are available in sub-packages:
 //
+//   - providers - All providers (https://pkg.go.dev/github.com/montanaflynn/grail/providers)
 //   - providers/openai - OpenAI provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/openai)
 //   - providers/gemini - Google Gemini provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/gemini)
-//
-// Links:
-//
-// - GitHub Repository, https://github.com/montanaflynn/grail
-// - Examples, https://github.com/montanaflynn/grail/tree/main/examples
-// - Contributing, https://github.com/montanaflynn/grail/blob/main/CONTRIBUTING.md
+//   - providers/mock - Mock provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/mock)
+
 package grail
 
 import (
