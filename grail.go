@@ -1,3 +1,15 @@
+// Package grail provides a unified interface for AI text and image generation
+// across multiple providers (OpenAI, Gemini, etc.). It supports multimodal
+// inputs (ordered sequences of text and images) and provides type-safe error
+// handling, structured logging, and flexible configuration options.
+//
+// Example usage:
+//
+//	provider, _ := openai.New()
+//	client := grail.NewClient(provider)
+//	res, _ := client.GenerateText(ctx, grail.TextRequest{
+//		Input: []grail.Part{grail.Text("Hello, world!")},
+//	})
 package grail
 
 import (

@@ -1,3 +1,24 @@
+// Package mock provides a test double implementation of the grail.Provider interface.
+// It's designed for testing code that depends on grail.Provider without making
+// actual API calls.
+//
+// Example usage:
+//
+//	provider := &mock.Provider{}
+//	provider.TextFn = func(ctx context.Context, req grail.TextRequest) (grail.TextResult, error) {
+//		return grail.TextResult{Text: "mock response"}, nil
+//	}
+//	provider.ImageFn = func(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error) {
+//		return grail.ImageResult{
+//			Images: []grail.ImageOutput{
+//				{Data: []byte("fake image"), MIME: "image/png"},
+//			},
+//		}, nil
+//	}
+//	client := grail.NewClient(provider)
+//	res, _ := client.GenerateText(ctx, grail.TextRequest{
+//		Input: []grail.Part{grail.Text("test")},
+//	})
 package mock
 
 import (

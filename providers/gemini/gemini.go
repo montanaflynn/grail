@@ -1,3 +1,23 @@
+// Package gemini provides a Google Gemini implementation of the grail.Provider interface.
+// It supports both text and image generation using Gemini models.
+//
+// Example usage:
+//
+//	provider, err := gemini.New(context.Background())
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	client := grail.NewClient(provider)
+//	res, err := client.GenerateText(ctx, grail.TextRequest{
+//		Input: []grail.Part{grail.Text("Hello, world!")},
+//	})
+//
+// The provider automatically uses the GEMINI_API_KEY environment variable
+// if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
+//
+// Default models:
+//   - Text: gemini-2.5-flash
+//   - Image: gemini-2.5-flash-image
 package gemini
 
 import (

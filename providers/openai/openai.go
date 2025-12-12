@@ -1,3 +1,23 @@
+// Package openai provides an OpenAI implementation of the grail.Provider interface.
+// It uses the OpenAI Responses API for both text and image generation.
+//
+// Example usage:
+//
+//	provider, err := openai.New()
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	client := grail.NewClient(provider)
+//	res, err := client.GenerateText(ctx, grail.TextRequest{
+//		Input: []grail.Part{grail.Text("Hello, world!")},
+//	})
+//
+// The provider automatically uses the OPENAI_API_KEY environment variable
+// if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
+//
+// Default models:
+//   - Text: gpt-5.1
+//   - Image: gpt-image-1
 package openai
 
 import (
