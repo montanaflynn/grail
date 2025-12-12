@@ -1,8 +1,6 @@
 # grail
 
 ![CI](https://img.shields.io/github/actions/workflow/status/montanaflynn/grail/ci.yml)
-![Version](https://img.shields.io/github/v/tag/montanaflynn/grail?label=version)
-![License](https://img.shields.io/github/license/montanaflynn/grail)
 [![Go Reference](https://img.shields.io/badge/go.dev-reference-00ADD8)](https://pkg.go.dev/github.com/montanaflynn/grail)
 
 A lightweight Go SDK that unifies multiple AI providers behind a consistent interface for text and image generation. 
@@ -126,6 +124,14 @@ provider, err := gemini.New(ctx,
 - `WithTextModel(model string)` - Override default text model (default: `gemini-2.5-flash`)
 - `WithImageModel(model string)` - Override default image model (default: `gemini-2.5-flash-image`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
+
+## Links
+
+- [API Reference](https://pkg.go.dev/github.com/montanaflynn/grail)
+- [Providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers)
+- [Repository](https://github.com/montanaflynn/grail)
+- [Examples](https://github.com/montanaflynn/grail/tree/main/examples)
+- [Changelog](https://github.com/montanaflynn/grail/blob/main/CHANGELOG.md)
 
 ## Documentation
 
