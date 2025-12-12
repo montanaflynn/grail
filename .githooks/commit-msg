@@ -1,0 +1,30 @@
+#!/bin/sh
+# Conventional commit message check without Node/commitlint.
+# Allows merge/revert commits and enforces: <type>(optional-scope)!: summary
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+msg="$(sed -n '1p' "$msg_file")"
+
+case "$msg" in
+  Merge\ *) exit 0 ;;
+  Revert\ *) exit 0 ;;
+  "") printf '%s\n' "Commit message is empty." >&2; exit 1 ;;
+esac
+
+pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-zA-Z0-9._-]+\))?!?: .+'
+
+if printf '%s\n' "$msg" | LC_ALL=C grep -Eq "$pattern"; then
+  exit 0
+fi
+
+cat <<'EOF' >&2
+Invalid commit message.
+Expected: <type>(optional-scope): summary
+Types: build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test
+Examples:
+  feat(api): add streaming responses
+  fix: handle nil provider config
+EOF
+exit 1
+

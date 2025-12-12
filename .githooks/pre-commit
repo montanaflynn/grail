@@ -1,0 +1,22 @@
+#!/bin/sh
+# gofmt staged Go files before commit (no external deps).
+set -e
+
+# Find staged Go files.
+files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+[ -z "$files" ] && exit 0
+
+if ! command -v gofmt >/dev/null 2>&1; then
+  echo >&2 "gofmt not found; install Go to use this hook."
+  exit 1
+fi
+
+echo "Running gofmt on staged Go files..."
+for f in $files; do
+  [ -f "$f" ] || continue
+  gofmt -w "$f"
+  git add "$f"
+done
+
+echo "gofmt complete."
+
