@@ -1,0 +1,61 @@
+name: Update Changelog
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install git-chglog
+        run: go install github.com/git-chglog/git-chglog/cmd/git-chglog@latest
+
+      - name: Generate Changelog
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          # Verify git-chglog is installed
+          git-chglog --version
+          # Ensure config exists
+          if [ ! -f .chglog/config.yml ]; then
+            git-chglog --init
+          fi
+          # Fetch all tags
+          git fetch --tags --force
+          # List tags for debugging
+          echo "Available tags:"
+          git tag -l
+          # Verify git is working
+          git --version
+          # Generate changelog
+          git-chglog -o CHANGELOG.md
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Ensure we're on main branch
+          git checkout main || git checkout -b main
+          git add CHANGELOG.md
+          if git diff --staged --quiet; then
+            echo "No changelog updates"
+          else
+            git commit -m "ci: update changelog"
+            git push origin main
+          fi
