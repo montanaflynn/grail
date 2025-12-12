@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/github/license/montanaflynn/grail)
 [![Go Reference](https://img.shields.io/badge/go.dev-reference-00ADD8)](https://pkg.go.dev/github.com/montanaflynn/grail)
 
-A lightweight Go SDK that unifies multiple AI providers (OpenAI, Gemini) behind a consistent interface for text and image generation. Swap providers without changing your code.
+A lightweight Go SDK that unifies multiple AI providers behind a consistent interface for text and image generation. 
 
 ## Design Goals
 
@@ -21,13 +21,10 @@ A lightweight Go SDK that unifies multiple AI providers (OpenAI, Gemini) behind 
 go get github.com/montanaflynn/grail
 ```
 
-> [!NOTE]
-> Providers automatically use environment variables for API keys (`OPENAI_API_KEY`, `GEMINI_API_KEY`) if no key is explicitly provided.
-
 ## Quick Start
 
 ```go
-// Create a provider
+// Create a provider (automatically uses OPENAI_API_KEY if not provided)
 provider, _ := openai.New()
 
 // Create a client
@@ -76,10 +73,63 @@ See the [`examples/`](examples/) directory for complete, runnable examples:
 - **[Image Understanding](examples/image-understanding/main.go)**: Text generation from images
 - **[OpenAI Image Options](examples/openai-image-options/main.go)**: Provider-specific image options
 
+## Providers
+
+### OpenAI
+
+```go
+import "github.com/montanaflynn/grail/providers/openai"
+
+// Basic usage (uses OPENAI_API_KEY env var)
+provider, err := openai.New()
+
+// With options
+provider, err := openai.New(
+    openai.WithAPIKey("sk-..."),
+    openai.WithTextModel("gpt-4"),
+    openai.WithImageModel("dall-e-3"),
+    openai.WithLogger(logger),
+)
+```
+
+**Options:**
+- `WithAPIKey(key string)` - Set API key explicitly
+- `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
+- `WithTextModel(model string)` - Override default text model (default: `gpt-5.1`)
+- `WithImageModel(model string)` - Override default image model (default: `gpt-image-1`)
+- `WithLogger(logger *slog.Logger)` - Set custom logger
+
+**Image Options:**
+- `WithImageFormat(format ImageFormat)` - Set output format (`png`, `jpeg`, `webp`)
+- `WithImageBackground(bg ImageBackground)` - Set background (`auto`, `transparent`, `opaque`)
+
+### Gemini
+
+```go
+import "github.com/montanaflynn/grail/providers/gemini"
+
+// Basic usage (uses GEMINI_API_KEY env var)
+provider, err := gemini.New(ctx)
+
+// With options
+provider, err := gemini.New(ctx,
+    gemini.WithAPIKey("..."),
+    gemini.WithTextModel("gemini-2.5-flash"),
+    gemini.WithImageModel("gemini-2.5-flash-image"),
+    gemini.WithLogger(logger),
+)
+```
+
+**Options:**
+- `WithAPIKey(key string)` - Set API key explicitly
+- `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
+- `WithTextModel(model string)` - Override default text model (default: `gemini-2.5-flash`)
+- `WithImageModel(model string)` - Override default image model (default: `gemini-2.5-flash-image`)
+- `WithLogger(logger *slog.Logger)` - Set custom logger
+
 ## Documentation
 
 - **API Reference**: [pkg.go.dev/github.com/montanaflynn/grail](https://pkg.go.dev/github.com/montanaflynn/grail)
-- **Providers**: See `providers/openai` and `providers/gemini` for provider-specific documentation
 
 ## Development
 
@@ -94,7 +144,10 @@ go fmt ./...
 go vet ./...
 
 # Or use make
-make          # Run fmt, lint, and test
+make format
+make lint
+make test
+make # runs all
 ```
 
 ## Contributing

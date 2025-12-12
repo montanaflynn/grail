@@ -10,6 +10,14 @@
 //	res, _ := client.GenerateText(ctx, grail.TextRequest{
 //		Input: []grail.Part{grail.Text("Hello, world!")},
 //	})
+//
+// Sub-packages:
+//
+// This package provides the core client and interfaces. Provider implementations
+// are available in sub-packages:
+//
+//   - [providers/openai](https://pkg.go.dev/github.com/montanaflynn/grail/providers/openai) - OpenAI provider
+//   - [providers/gemini](https://pkg.go.dev/github.com/montanaflynn/grail/providers/gemini) - Google Gemini provider
 package grail
 
 import (
@@ -168,6 +176,7 @@ func IsCode(err error, code ErrorCode) bool {
 }
 
 // Provider is the pluggable backend surface; implement with Gemini, OpenAI, etc.
+// See [providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers) for available implementations.
 type Provider interface {
 	GenerateText(ctx context.Context, req TextRequest) (TextResult, error)
 	GenerateImage(ctx context.Context, req ImageRequest) (ImageResult, error)
@@ -181,6 +190,7 @@ type LoggerAware interface {
 }
 
 // Client is a thin wrapper that delegates to a Provider. Swap providers to change backends.
+// See [providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers) for available implementations.
 type Client struct {
 	provider Provider
 	log      *slog.Logger
@@ -233,6 +243,7 @@ func WithLoggerFormat(format string, level LoggerLevel) ClientOption {
 }
 
 // NewClient builds a Client from a Provider, applying functional options.
+// See [providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers) for available Provider implementations.
 func NewClient(p Provider, opts ...ClientOption) *Client {
 	cfg := ClientConfig{
 		Logger: slog.Default(),
@@ -335,6 +346,7 @@ type ImageRequest struct {
 	Input   []Part
 	Options ImageOptions
 	// ProviderOptions carries provider-specific option values (e.g., openai image tool options).
+	// See [providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers) for provider-specific options.
 	ProviderOptions []ProviderOption
 }
 
@@ -361,6 +373,7 @@ type ImageOptions struct {
 
 // ProviderOption is a provider-specific option attached to a request.
 // Providers may type-assert to their own option types. Description is advisory.
+// See [providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers) for provider-specific option types.
 type ProviderOption interface {
 	Description() string
 }
