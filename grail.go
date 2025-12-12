@@ -20,7 +20,6 @@
 //   - providers/openai - OpenAI provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/openai)
 //   - providers/gemini - Google Gemini provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/gemini)
 //   - providers/mock - Mock provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/mock)
-
 package grail
 
 import (
