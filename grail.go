@@ -1,6 +1,6 @@
 // Package grail provides a unified interface for AI text and image generation
 // across multiple providers (OpenAI, Gemini, etc.). It supports multimodal
-// inputs (ordered sequences of text and images) and provides type-safe error
+// inputs (ordered sequences of text, images, and PDFs) and provides type-safe error
 // handling, structured logging, and flexible configuration options.
 //
 // Example usage:
@@ -9,6 +9,16 @@
 //	client := grail.NewClient(provider)
 //	res, _ := client.GenerateText(ctx, grail.TextRequest{
 //		Input: []grail.Part{grail.Text("Hello, world!")},
+//	})
+//
+// PDF example:
+//
+//	pdfData, _ := os.ReadFile("document.pdf")
+//	res, _ := client.GenerateText(ctx, grail.TextRequest{
+//		Input: []grail.Part{
+//			grail.Text("Summarize this document"),
+//			grail.PDF(pdfData, "application/pdf"),
+//		},
 //	})
 //
 // Sub-packages:
@@ -312,6 +322,7 @@ type PartKind string
 const (
 	PartText  PartKind = "text"
 	PartImage PartKind = "image"
+	PartPDF   PartKind = "pdf"
 )
 
 // TextPart represents a text segment.
@@ -335,6 +346,25 @@ func (ImagePart) Kind() PartKind { return PartImage }
 // Image is a helper to build an image Part.
 func Image(data []byte, mime string) Part {
 	return ImagePart{Data: data, MIME: mime}
+}
+
+// PDFPart represents an inline PDF payload.
+type PDFPart struct {
+	Data     []byte // raw bytes, required
+	MIME     string // optional, defaults to application/pdf
+	Filename string // optional, filename for the PDF
+}
+
+func (PDFPart) Kind() PartKind { return PartPDF }
+
+// PDF is a helper to build a PDF Part.
+func PDF(data []byte, mime string) Part {
+	return PDFPart{Data: data, MIME: mime}
+}
+
+// PDFWithFilename is a helper to build a PDF Part with a filename.
+func PDFWithFilename(data []byte, mime, filename string) Part {
+	return PDFPart{Data: data, MIME: mime, Filename: filename}
 }
 
 // TextRequest represents text generation from ordered multimodal input.
@@ -416,6 +446,12 @@ func summarizeParts(parts []Part) []map[string]any {
 				"mime": v.MIME,
 				"len":  len(v.Data),
 			})
+		case PDFPart:
+			out = append(out, map[string]any{
+				"type": "pdf",
+				"mime": v.MIME,
+				"len":  len(v.Data),
+			})
 		default:
 			out = append(out, map[string]any{
 				"type": "unknown",
@@ -424,6 +460,11 @@ func summarizeParts(parts []Part) []map[string]any {
 	}
 	return out
 }
+
+const (
+	// MaxPDFSize is the maximum size for a PDF file in bytes (50 MB).
+	MaxPDFSize = 50 * 1024 * 1024
+)
 
 func validateTextRequest(req TextRequest) error {
 	if len(req.Input) == 0 {
@@ -436,12 +477,49 @@ func validateTextRequest(req TextRequest) error {
 				"top_p":       *req.Options.TopP,
 			}))
 	}
+	if err := validateParts(req.Input); err != nil {
+		return err
+	}
 	return nil
 }
 
 func validateImageRequest(req ImageRequest) error {
 	if len(req.Input) == 0 {
 		return InvalidInput("image input must not be empty")
+	}
+	if err := validateParts(req.Input); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateParts(parts []Part) error {
+	for i, p := range parts {
+		switch v := p.(type) {
+		case PDFPart:
+			if len(v.Data) == 0 {
+				return InvalidInput(fmt.Sprintf("part %d: PDF data is empty", i))
+			}
+			if len(v.Data) > MaxPDFSize {
+				return InvalidInput(fmt.Sprintf("part %d: PDF file size %d exceeds maximum %d bytes", i, len(v.Data), MaxPDFSize),
+					WithMetadata(map[string]any{
+						"part_index": i,
+						"size":       len(v.Data),
+						"max_size":   MaxPDFSize,
+					}))
+			}
+			if v.MIME != "" && v.MIME != "application/pdf" {
+				return InvalidInput(fmt.Sprintf("part %d: PDF MIME type must be application/pdf, got %s", i, v.MIME),
+					WithMetadata(map[string]any{
+						"part_index": i,
+						"mime":       v.MIME,
+					}))
+			}
+		case ImagePart:
+			if len(v.Data) == 0 {
+				return InvalidInput(fmt.Sprintf("part %d: image data is empty", i))
+			}
+		}
 	}
 	return nil
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/openai/openai-go/v3/shared/constant"
 )
 
 const (
@@ -426,6 +427,35 @@ func toResponseInput(input []grail.Part) (responses.ResponseInputItemUnionParam,
 					ImageURL: openai.String(dataURL),
 				},
 			})
+		case grail.PDFPart:
+			if len(v.Data) == 0 {
+				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: PDF data is empty", i)
+			}
+			// Validate PDF magic bytes
+			if len(v.Data) < 4 || string(v.Data[0:4]) != "%PDF" {
+				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: invalid PDF data (missing PDF header)", i)
+			}
+			mime := v.MIME
+			if mime == "" {
+				mime = "application/pdf"
+			}
+			// Encode to base64
+			b64 := base64.StdEncoding.EncodeToString(v.Data)
+			// FileData should be a data URL: "data:application/pdf;base64,<base64>"
+			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
+			// Use provided filename or default to "document.pdf"
+			filename := v.Filename
+			if filename == "" {
+				filename = "document.pdf"
+			}
+			// Type must be "input_file" constant
+			content = append(content, responses.ResponseInputContentUnionParam{
+				OfInputFile: &responses.ResponseInputFileParam{
+					FileData: param.NewOpt(dataURL),
+					Filename: param.NewOpt(filename),
+					Type:     constant.InputFile("").Default(),
+				},
+			})
 		default:
 			return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: unknown part type %T", i, p)
 		}
@@ -483,6 +513,12 @@ func summarizeParts(parts []grail.Part) []map[string]any {
 		case grail.ImagePart:
 			out = append(out, map[string]any{
 				"type": "image",
+				"mime": v.MIME,
+				"len":  len(v.Data),
+			})
+		case grail.PDFPart:
+			out = append(out, map[string]any{
+				"type": "pdf",
 				"mime": v.MIME,
 				"len":  len(v.Data),
 			})

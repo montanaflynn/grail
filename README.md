@@ -59,6 +59,16 @@ imgRes2, _ := client.GenerateImage(ctx, grail.ImageRequest{
 	},
 })
 os.WriteFile("variation.png", imgRes2.Images[0].Data, 0644)
+
+// PDF understanding (text from PDF)
+pdfData, _ := os.ReadFile("document.pdf")
+pdfRes, _ := client.GenerateText(ctx, grail.TextRequest{
+	Input: []grail.Part{
+		grail.Text("Summarize this document"),
+		grail.PDF(pdfData, "application/pdf"),
+	},
+})
+fmt.Println(pdfRes.Text)
 ```
 
 ## Examples
@@ -69,6 +79,8 @@ See the [`examples/`](examples/) directory for complete, runnable examples:
 - **[Text Generation](examples/text-generation/main.go)**: Text generation with provider selection
 - **[Text to Image](examples/text-to-image/main.go)**: Image generation from text prompts
 - **[Image Understanding](examples/image-understanding/main.go)**: Text generation from images
+- **[PDF Understanding](examples/pdf-understanding/main.go)**: Text generation from PDF documents
+- **[PDF to Image](examples/pdf-to-image/main.go)**: Image generation from PDF documents (e.g., infographics)
 - **[OpenAI Image Options](examples/openai-image-options/main.go)**: Provider-specific image options
 
 ## Providers
