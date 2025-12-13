@@ -30,8 +30,7 @@ import (
 
 	"github.com/montanaflynn/grail"
 
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 const (
@@ -96,10 +95,101 @@ func WithLogger(l *slog.Logger) Option {
 
 // Provider is a Gemini-backed implementation of grail.Provider.
 type Provider struct {
-	raw        *genai.Client
+	client     *genai.Client
 	textModel  string
 	imageModel string
 	log        *slog.Logger
+}
+
+// ImageAspectRatio enumerates supported Gemini image aspect ratios.
+type ImageAspectRatio string
+
+const (
+	ImageAspectRatio1_1  ImageAspectRatio = "1:1"
+	ImageAspectRatio2_3  ImageAspectRatio = "2:3"
+	ImageAspectRatio3_2  ImageAspectRatio = "3:2"
+	ImageAspectRatio3_4  ImageAspectRatio = "3:4"
+	ImageAspectRatio4_3  ImageAspectRatio = "4:3"
+	ImageAspectRatio4_5  ImageAspectRatio = "4:5"
+	ImageAspectRatio5_4  ImageAspectRatio = "5:4"
+	ImageAspectRatio9_16 ImageAspectRatio = "9:16"
+	ImageAspectRatio16_9 ImageAspectRatio = "16:9"
+	ImageAspectRatio21_9 ImageAspectRatio = "21:9"
+)
+
+var ImageAspectRatios = map[string]ImageAspectRatio{
+	"1:1":  ImageAspectRatio1_1,
+	"2:3":  ImageAspectRatio2_3,
+	"3:2":  ImageAspectRatio3_2,
+	"3:4":  ImageAspectRatio3_4,
+	"4:3":  ImageAspectRatio4_3,
+	"4:5":  ImageAspectRatio4_5,
+	"5:4":  ImageAspectRatio5_4,
+	"9:16": ImageAspectRatio9_16,
+	"16:9": ImageAspectRatio16_9,
+	"21:9": ImageAspectRatio21_9,
+}
+
+// ImageSize enumerates supported Gemini image sizes.
+type ImageSize string
+
+const (
+	ImageSize1K ImageSize = "1K"
+	ImageSize2K ImageSize = "2K"
+	ImageSize4K ImageSize = "4K"
+)
+
+var ImageSizes = map[string]ImageSize{
+	"1K": ImageSize1K,
+	"2K": ImageSize2K,
+	"4K": ImageSize4K,
+}
+
+// ImageOption mutates Gemini image generation settings.
+type ImageOption interface {
+	grail.ProviderOption
+	apply(*imageConfig)
+}
+
+type imageConfig struct {
+	aspectRatio ImageAspectRatio
+	size        ImageSize
+}
+
+type imageOptionFunc struct {
+	desc string
+	fn   func(*imageConfig)
+}
+
+func (o imageOptionFunc) Description() string { return o.desc }
+func (o imageOptionFunc) apply(cfg *imageConfig) {
+	if o.fn != nil {
+		o.fn(cfg)
+	}
+}
+
+// WithImageAspectRatio sets the Gemini image aspect ratio.
+func WithImageAspectRatio(ratio ImageAspectRatio) ImageOption {
+	return imageOptionFunc{
+		desc: fmt.Sprintf("gemini image aspect ratio %s", ratio),
+		fn: func(c *imageConfig) {
+			if ratio != "" {
+				c.aspectRatio = ratio
+			}
+		},
+	}
+}
+
+// WithImageSize sets the Gemini image size.
+func WithImageSize(size ImageSize) ImageOption {
+	return imageOptionFunc{
+		desc: fmt.Sprintf("gemini image size %s", size),
+		fn: func(c *imageConfig) {
+			if size != "" {
+				c.size = size
+			}
+		},
+	}
 }
 
 // New constructs a Gemini provider using functional options.
@@ -123,18 +213,20 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		}
 	}
 
-	clientOpts := []option.ClientOption{}
+	clientConfig := &genai.ClientConfig{
+		Backend: genai.BackendGeminiAPI,
+	}
 	if cfg.apiKey != "" {
-		clientOpts = append(clientOpts, option.WithAPIKey(cfg.apiKey))
+		clientConfig.APIKey = cfg.apiKey
 	}
 
-	raw, err := genai.NewClient(ctx, clientOpts...)
+	client, err := genai.NewClient(ctx, clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("new gemini client: %w", err)
 	}
 
 	return &Provider{
-		raw:        raw,
+		client:     client,
 		textModel:  cfg.textModel,
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
@@ -176,16 +268,20 @@ func (c *Provider) GenerateText(ctx context.Context, req grail.TextRequest) (gra
 
 	c.log.Debug("generate text request", slog.String("model", modelName), slog.Any("options", req.Options), slog.Any("parts", summarizeParts(req.Input)))
 
-	model := c.raw.GenerativeModel(modelName)
-	applyTextOptions(model, req.Options)
+	config := &genai.GenerateContentConfig{}
+	applyTextOptions(config, req.Options)
 
-	resp, err := model.GenerateContent(ctx, parts...)
+	contents := []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
 	if err != nil {
 		return grail.TextResult{}, fmt.Errorf("generate text: %w", err)
 	}
 
 	return grail.TextResult{
-		Text: firstText(resp),
+		Text: resp.Text(),
 		Raw:  resp,
 	}, nil
 }
@@ -208,10 +304,14 @@ func (c *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (g
 
 	c.log.Debug("generate image request", slog.String("model", modelName), slog.Any("options", req.Options), slog.Any("parts", summarizeParts(req.Input)))
 
-	model := c.raw.GenerativeModel(modelName)
-	applyImageOptions(model, req.Options)
+	config := &genai.GenerateContentConfig{}
+	applyImageOptions(config, req.Options, req.ProviderOptions)
 
-	resp, err := model.GenerateContent(ctx, parts...)
+	contents := []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
 	if err != nil {
 		return grail.ImageResult{}, fmt.Errorf("generate image: %w", err)
 	}
@@ -225,12 +325,12 @@ func (c *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (g
 	}, nil
 }
 
-func toGenAIParts(input []grail.Part) ([]genai.Part, error) {
-	out := make([]genai.Part, 0, len(input))
+func toGenAIParts(input []grail.Part) ([]*genai.Part, error) {
+	out := make([]*genai.Part, 0, len(input))
 	for i, p := range input {
 		switch v := p.(type) {
 		case grail.TextPart:
-			out = append(out, genai.Text(v.Text))
+			out = append(out, genai.NewPartFromText(v.Text))
 		case grail.ImagePart:
 			if len(v.Data) == 0 {
 				return nil, fmt.Errorf("part %d: image data is empty", i)
@@ -239,11 +339,7 @@ func toGenAIParts(input []grail.Part) ([]genai.Part, error) {
 			if mime == "" {
 				mime = "image/png"
 			}
-			format := mime
-			if strings.HasPrefix(mime, "image/") {
-				format = mime[len("image/"):]
-			}
-			out = append(out, genai.ImageData(format, v.Data))
+			out = append(out, genai.NewPartFromBytes(v.Data, mime))
 		case grail.PDFPart:
 			if len(v.Data) == 0 {
 				return nil, fmt.Errorf("part %d: PDF data is empty", i)
@@ -252,11 +348,7 @@ func toGenAIParts(input []grail.Part) ([]genai.Part, error) {
 			if mime == "" {
 				mime = "application/pdf"
 			}
-			// Gemini uses Blob for PDF files
-			out = append(out, genai.Blob{
-				MIMEType: mime,
-				Data:     v.Data,
-			})
+			out = append(out, genai.NewPartFromBytes(v.Data, mime))
 		default:
 			return nil, fmt.Errorf("part %d: unknown part type %T", i, p)
 		}
@@ -264,47 +356,51 @@ func toGenAIParts(input []grail.Part) ([]genai.Part, error) {
 	return out, nil
 }
 
-func applyTextOptions(model *genai.GenerativeModel, opts grail.TextOptions) {
+func applyTextOptions(config *genai.GenerateContentConfig, opts grail.TextOptions) {
 	if opts.SystemPrompt != "" {
-		model.SystemInstruction = &genai.Content{
-			Parts: []genai.Part{
-				genai.Text(opts.SystemPrompt),
+		config.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{
+				{Text: opts.SystemPrompt},
 			},
 		}
 	}
 	if opts.Temperature != nil {
-		model.SetTemperature(*opts.Temperature)
+		config.Temperature = genai.Ptr(*opts.Temperature)
 	}
 	if opts.TopP != nil {
-		model.SetTopP(*opts.TopP)
+		config.TopP = genai.Ptr(*opts.TopP)
 	}
 	if opts.MaxTokens != nil {
-		model.SetMaxOutputTokens(*opts.MaxTokens)
+		config.MaxOutputTokens = int32(*opts.MaxTokens)
 	}
 }
 
-func applyImageOptions(model *genai.GenerativeModel, opts grail.ImageOptions) {
+func applyImageOptions(config *genai.GenerateContentConfig, opts grail.ImageOptions, providerOpts []grail.ProviderOption) {
 	if opts.SystemPrompt != "" {
-		model.SystemInstruction = &genai.Content{
-			Parts: []genai.Part{
-				genai.Text(opts.SystemPrompt),
+		config.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{
+				{Text: opts.SystemPrompt},
 			},
 		}
 	}
-}
 
-func firstText(resp *genai.GenerateContentResponse) string {
-	for _, cand := range resp.Candidates {
-		if cand == nil || cand.Content == nil {
-			continue
-		}
-		for _, part := range cand.Content.Parts {
-			if t, ok := part.(genai.Text); ok {
-				return string(t)
-			}
+	cfg := imageConfig{}
+	for _, opt := range providerOpts {
+		if fn, ok := opt.(ImageOption); ok && fn != nil {
+			fn.apply(&cfg)
 		}
 	}
-	return ""
+
+	// Apply image config if aspect ratio or size is set
+	if cfg.aspectRatio != "" || cfg.size != "" {
+		config.ImageConfig = &genai.ImageConfig{}
+		if cfg.aspectRatio != "" {
+			config.ImageConfig.AspectRatio = string(cfg.aspectRatio)
+		}
+		if cfg.size != "" {
+			config.ImageConfig.ImageSize = string(cfg.size)
+		}
+	}
 }
 
 func extractImages(resp *genai.GenerateContentResponse) []grail.ImageOutput {
@@ -314,16 +410,10 @@ func extractImages(resp *genai.GenerateContentResponse) []grail.ImageOutput {
 			continue
 		}
 		for _, part := range cand.Content.Parts {
-			switch v := part.(type) {
-			case genai.Blob:
+			if part.InlineData != nil {
 				out = append(out, grail.ImageOutput{
-					Data: v.Data,
-					MIME: v.MIMEType,
-				})
-			case *genai.Blob:
-				out = append(out, grail.ImageOutput{
-					Data: v.Data,
-					MIME: v.MIMEType,
+					Data: part.InlineData.Data,
+					MIME: part.InlineData.MIMEType,
 				})
 			}
 		}

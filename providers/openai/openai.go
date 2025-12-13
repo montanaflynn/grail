@@ -141,6 +141,44 @@ var ImageBackgrounds = map[string]ImageBackground{
 	"opaque":      ImageBackgroundOpaque,
 }
 
+// ImageSize enumerates supported OpenAI image sizes.
+type ImageSize string
+
+const (
+	ImageSizeAuto      ImageSize = "auto"
+	ImageSize1024x1024 ImageSize = "1024x1024"
+	ImageSize1536x1024 ImageSize = "1536x1024"
+	ImageSize1024x1536 ImageSize = "1024x1536"
+	ImageSize256x256   ImageSize = "256x256"
+	ImageSize512x512   ImageSize = "512x512"
+	ImageSize1792x1024 ImageSize = "1792x1024"
+	ImageSize1024x1792 ImageSize = "1024x1792"
+)
+
+var ImageSizes = map[string]ImageSize{
+	"auto":      ImageSizeAuto,
+	"1024x1024": ImageSize1024x1024,
+	"1536x1024": ImageSize1536x1024,
+	"1024x1536": ImageSize1024x1536,
+	"256x256":   ImageSize256x256,
+	"512x512":   ImageSize512x512,
+	"1792x1024": ImageSize1792x1024,
+	"1024x1792": ImageSize1024x1792,
+}
+
+// ImageModeration enumerates supported OpenAI image moderation levels.
+type ImageModeration string
+
+const (
+	ImageModerationAuto ImageModeration = "auto"
+	ImageModerationLow  ImageModeration = "low"
+)
+
+var ImageModerations = map[string]ImageModeration{
+	"auto": ImageModerationAuto,
+	"low":  ImageModerationLow,
+}
+
 // ImageOption mutates OpenAI image generation settings.
 type ImageOption interface {
 	grail.ProviderOption
@@ -148,8 +186,11 @@ type ImageOption interface {
 }
 
 type imageConfig struct {
-	format     ImageFormat
-	background ImageBackground
+	format            ImageFormat
+	background        ImageBackground
+	size              ImageSize
+	moderation        ImageModeration
+	outputCompression *int64
 }
 
 type imageOptionFunc struct {
@@ -183,6 +224,43 @@ func WithImageBackground(b ImageBackground) ImageOption {
 		fn: func(c *imageConfig) {
 			if b != "" {
 				c.background = b
+			}
+		},
+	}
+}
+
+// WithImageSize sets the OpenAI image size.
+func WithImageSize(size ImageSize) ImageOption {
+	return imageOptionFunc{
+		desc: fmt.Sprintf("openai image size %s", size),
+		fn: func(c *imageConfig) {
+			if size != "" {
+				c.size = size
+			}
+		},
+	}
+}
+
+// WithImageModeration sets the OpenAI image moderation level.
+func WithImageModeration(moderation ImageModeration) ImageOption {
+	return imageOptionFunc{
+		desc: fmt.Sprintf("openai image moderation %s", moderation),
+		fn: func(c *imageConfig) {
+			if moderation != "" {
+				c.moderation = moderation
+			}
+		},
+	}
+}
+
+// WithImageOutputCompression sets the OpenAI image output compression (0-100% for JPEG/WebP).
+func WithImageOutputCompression(compression int) ImageOption {
+	return imageOptionFunc{
+		desc: fmt.Sprintf("openai image output compression %d%%", compression),
+		fn: func(c *imageConfig) {
+			if compression >= 0 && compression <= 100 {
+				comp := int64(compression)
+				c.outputCompression = &comp
 			}
 		},
 	}
@@ -323,11 +401,40 @@ func (p *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (g
 	cfg := imageConfig{
 		format:     ImageFormat(p.imgFormat),
 		background: ImageBackground("auto"),
+		size:       ImageSizeAuto,
+		moderation: ImageModerationAuto,
 	}
 	for _, opt := range req.ProviderOptions {
 		if fn, ok := opt.(ImageOption); ok && fn != nil {
 			fn.apply(&cfg)
 		}
+	}
+
+	size := string(cfg.size)
+	if size == "" {
+		size = "auto"
+	}
+	moderation := string(cfg.moderation)
+	if moderation == "" {
+		moderation = "auto"
+	}
+
+	imageGenParam := &responses.ToolImageGenerationParam{
+		Type:          "image_generation",
+		Model:         p.imageModel,
+		OutputFormat:  string(cfg.format),
+		Background:    string(cfg.background),
+		Moderation:    moderation,
+		Quality:       "auto",
+		Size:          size,
+		InputFidelity: "",
+		PartialImages: param.NewOpt(int64(0)),
+	}
+
+	if cfg.outputCompression != nil {
+		imageGenParam.OutputCompression = param.NewOpt(*cfg.outputCompression)
+	} else {
+		imageGenParam.OutputCompression = param.NewOpt(int64(100))
 	}
 
 	params := responses.ResponseNewParams{
@@ -337,18 +444,7 @@ func (p *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (g
 		},
 		Tools: []responses.ToolUnionParam{
 			{
-				OfImageGeneration: &responses.ToolImageGenerationParam{
-					Type:              "image_generation",
-					Model:             p.imageModel,
-					OutputFormat:      string(cfg.format),
-					Background:        string(cfg.background),
-					Moderation:        "auto",
-					Quality:           "auto",
-					Size:              "auto",
-					InputFidelity:     "",
-					OutputCompression: param.NewOpt(int64(100)),
-					PartialImages:     param.NewOpt(int64(0)),
-				},
+				OfImageGeneration: imageGenParam,
 			},
 		},
 	}
