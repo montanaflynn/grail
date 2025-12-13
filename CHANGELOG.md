@@ -2,6 +2,18 @@
 ## [Unreleased]
 
 
+<a name="v0.1.5"></a>
+## [v0.1.5] - 2025-12-13
+
+### Documentation
+
+- add FUNDING.yml and SECURITY.md
+
+### Features
+
+- add provider-specific image size and aspect ratio options ([#3](https://github.com/montanaflynn/grail/issues/3))
+
+
 <a name="v0.1.4"></a>
 ## [v0.1.4] - 2025-12-13
 
@@ -49,7 +61,8 @@
 - initial release with unified AI provider interface
 
 
-[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.1.5...HEAD
+[v0.1.5]: https://github.com/montanaflynn/grail/compare/v0.1.4...v0.1.5
 [v0.1.4]: https://github.com/montanaflynn/grail/compare/v0.1.3...v0.1.4
 [v0.1.3]: https://github.com/montanaflynn/grail/compare/v0.1.2...v0.1.3
 [v0.1.2]: https://github.com/montanaflynn/grail/compare/v0.1.1...v0.1.2
