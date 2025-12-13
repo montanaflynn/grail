@@ -44,10 +44,10 @@ func main() {
 
 	res, err := client.GenerateImage(ctx, grail.ImageRequest{
 		Input: []grail.Part{
-			grail.Text("A professional infographic about renewable energy sources, showing solar panels, wind turbines, and hydroelectric dams with statistics"),
+			grail.Text("An owl logo icon for a childrens clothing brand"),
 		},
 		Options: grail.ImageOptions{
-			SystemPrompt: "You're an expert at creating clear, informative infographics.",
+			SystemPrompt: "You're an experienced logo illustrator.",
 		},
 		ProviderOptions: []grail.ProviderOption{
 			gemini.WithImageAspectRatio(gemini.ImageAspectRatios[strings.ToLower(*aspectRatioFlag)]),
