@@ -40,6 +40,16 @@ imgRes, _ := client.GenerateImage(ctx, grail.ImageRequest{
 })
 os.WriteFile("sunset.png", imgRes.Images[0].Data, 0644)
 
+// Generate image with provider-specific options
+import "github.com/montanaflynn/grail/providers/gemini"
+imgRes2, _ := client.GenerateImage(ctx, grail.ImageRequest{
+	Input: []grail.Part{grail.Text("A landscape photo")},
+	ProviderOptions: []grail.ProviderOption{
+		gemini.WithImageAspectRatio(gemini.ImageAspectRatio16_9),
+		gemini.WithImageSize(gemini.ImageSize2K),
+	},
+})
+
 // Image understanding (text from image)
 imgData, _ := os.ReadFile("photo.jpg")
 textRes, _ := client.GenerateText(ctx, grail.TextRequest{
@@ -81,7 +91,8 @@ See the [`examples/`](examples/) directory for complete, runnable examples:
 - **[Image Understanding](examples/image-understanding/main.go)**: Text generation from images
 - **[PDF Understanding](examples/pdf-understanding/main.go)**: Text generation from PDF documents
 - **[PDF to Image](examples/pdf-to-image/main.go)**: Image generation from PDF documents (e.g., infographics)
-- **[OpenAI Image Options](examples/openai-image-options/main.go)**: Provider-specific image options
+- **[OpenAI Image Options](examples/openai-image-options/main.go)**: Provider-specific image options (format, background, size, moderation, compression)
+- **[Gemini Image Options](examples/gemini-image-options/main.go)**: Provider-specific image options (aspect ratio, size)
 
 ## Providers
 
@@ -112,6 +123,9 @@ provider, err := openai.New(
 **Image Options:**
 - `WithImageFormat(format ImageFormat)` - Set output format (`png`, `jpeg`, `webp`)
 - `WithImageBackground(bg ImageBackground)` - Set background (`auto`, `transparent`, `opaque`)
+- `WithImageSize(size ImageSize)` - Set image size (`auto`, `1024x1024`, `1536x1024`, `1024x1536`, `256x256`, `512x512`, `1792x1024`, `1024x1792`)
+- `WithImageModeration(moderation ImageModeration)` - Set moderation level (`auto`, `low`)
+- `WithImageOutputCompression(compression int64)` - Set output compression quality (0-100)
 
 ### Gemini
 

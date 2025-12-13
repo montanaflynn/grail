@@ -12,18 +12,15 @@ import (
 	"log/slog"
 
 	"github.com/montanaflynn/grail"
-	"github.com/montanaflynn/grail/providers/openai"
+	"github.com/montanaflynn/grail/providers/gemini"
 )
 
-// Demonstrates OpenAI image options (output format, background, size, moderation, compression) using ImageOptions.
+// Demonstrates Gemini image options (aspect ratio, size) using ImageOptions.
 func main() {
 	ctx := context.Background()
 
-	formatFlag := flag.String("format", "png", "openai output format: png|jpeg|jpg|webp")
-	backgroundFlag := flag.String("background", "auto", "openai background: auto|transparent|opaque")
-	sizeFlag := flag.String("size", "auto", "openai image size: auto|1024x1024|1536x1024|1024x1536|256x256|512x512|1792x1024|1024x1792")
-	moderationFlag := flag.String("moderation", "auto", "openai moderation: auto|low")
-	compressionFlag := flag.Int("compression", 100, "openai output compression: 0-100")
+	aspectRatioFlag := flag.String("aspect-ratio", "16:9", "gemini aspect ratio: 1:1|2:3|3:2|3:4|4:3|4:5|5:4|9:16|16:9|21:9")
+	sizeFlag := flag.String("size", "2K", "gemini image size: 1K|2K|4K")
 	debugFlag := flag.Bool("debug", false, "enable debug logging")
 	flag.Parse()
 
@@ -35,11 +32,12 @@ func main() {
 		Level: level,
 	}))
 
-	provider, err := openai.New(
-		openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
+	provider, err := gemini.New(
+		ctx,
+		gemini.WithAPIKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {
-		log.Fatalf("new openai provider: %v", err)
+		log.Fatalf("new gemini provider: %v", err)
 	}
 
 	client := grail.NewClient(provider, grail.WithLogger(logger))
@@ -52,11 +50,8 @@ func main() {
 			SystemPrompt: "You're an experienced logo illustrator.",
 		},
 		ProviderOptions: []grail.ProviderOption{
-			openai.WithImageFormat(openai.ImageFormats[strings.ToLower(*formatFlag)]),
-			openai.WithImageBackground(openai.ImageBackgrounds[strings.ToLower(*backgroundFlag)]),
-			openai.WithImageSize(openai.ImageSizes[strings.ToLower(*sizeFlag)]),
-			openai.WithImageModeration(openai.ImageModerations[strings.ToLower(*moderationFlag)]),
-			openai.WithImageOutputCompression(*compressionFlag),
+			gemini.WithImageAspectRatio(gemini.ImageAspectRatios[strings.ToLower(*aspectRatioFlag)]),
+			gemini.WithImageSize(gemini.ImageSizes[strings.ToUpper(*sizeFlag)]),
 		},
 	})
 	if err != nil {
@@ -68,7 +63,7 @@ func main() {
 		return
 	}
 
-	if err := saveImages("examples-output", "openai-image-options", res.Images); err != nil {
+	if err := saveImages("examples-output", "gemini-image-options", res.Images); err != nil {
 		log.Fatalf("save images: %v", err)
 	}
 }
