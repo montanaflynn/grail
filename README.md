@@ -80,6 +80,7 @@ See the [`examples/`](examples/) directory for complete, runnable examples:
 - **[Text to Image](examples/text-to-image/main.go)**: Image generation from text prompts
 - **[Image Understanding](examples/image-understanding/main.go)**: Text generation from images
 - **[PDF Understanding](examples/pdf-understanding/main.go)**: Text generation from PDF documents
+- **[PDF to Image](examples/pdf-to-image/main.go)**: Image generation from PDF documents (e.g., infographics)
 - **[OpenAI Image Options](examples/openai-image-options/main.go)**: Provider-specific image options
 
 ## Providers
