@@ -244,6 +244,19 @@ func toGenAIParts(input []grail.Part) ([]genai.Part, error) {
 				format = mime[len("image/"):]
 			}
 			out = append(out, genai.ImageData(format, v.Data))
+		case grail.PDFPart:
+			if len(v.Data) == 0 {
+				return nil, fmt.Errorf("part %d: PDF data is empty", i)
+			}
+			mime := v.MIME
+			if mime == "" {
+				mime = "application/pdf"
+			}
+			// Gemini uses Blob for PDF files
+			out = append(out, genai.Blob{
+				MIMEType: mime,
+				Data:     v.Data,
+			})
 		default:
 			return nil, fmt.Errorf("part %d: unknown part type %T", i, p)
 		}
@@ -331,6 +344,12 @@ func summarizeParts(parts []grail.Part) []map[string]any {
 		case grail.ImagePart:
 			out = append(out, map[string]any{
 				"type": "image",
+				"mime": v.MIME,
+				"len":  len(v.Data),
+			})
+		case grail.PDFPart:
+			out = append(out, map[string]any{
+				"type": "pdf",
 				"mime": v.MIME,
 				"len":  len(v.Data),
 			})
