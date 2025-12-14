@@ -15,7 +15,7 @@ import (
 	"github.com/montanaflynn/grail/providers/openai"
 )
 
-// Demonstrates text generation with ordered input and optional provider selection.
+// Demonstrates text generation with provider selection.
 func main() {
 	ctx := context.Background()
 
@@ -32,7 +32,6 @@ func main() {
 		Level: level,
 	}))
 
-	// Determine which providers to run (default is Gemini if none specified).
 	runOpenAI := *openaiFlag
 	runGemini := *geminiFlag || (!*openaiFlag && !*geminiFlag)
 
@@ -110,14 +109,16 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client)
 }
 
-func generateText(ctx context.Context, client *grail.Client) (string, error) {
-	res, err := client.GenerateText(ctx, grail.TextRequest{
-		Input: []grail.Part{
-			grail.Text("Explain how AI works in a few words"),
+func generateText(ctx context.Context, client grail.Client) (string, error) {
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("Explain how AI works in a few words"),
 		},
+		Output: grail.OutputText(),
 	})
 	if err != nil {
 		return "", err
 	}
-	return res.Text, nil
+	text, _ := res.Text()
+	return text, nil
 }

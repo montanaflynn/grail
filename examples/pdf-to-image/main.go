@@ -77,7 +77,7 @@ func main() {
 
 	type result struct {
 		provider string
-		images   []grail.ImageOutput
+		images   []grail.ImageOutputInfo
 		err      error
 	}
 
@@ -122,7 +122,7 @@ func main() {
 	}
 }
 
-func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName, envKey string, pdfData []byte, filename string) ([]grail.ImageOutput, error) {
+func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName, envKey string, pdfData []byte, filename string) ([]grail.ImageOutputInfo, error) {
 	key := os.Getenv(envKey)
 
 	var (
@@ -151,17 +151,20 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateImage(ctx, client, pdfData, filename)
 }
 
-func generateImage(ctx context.Context, client *grail.Client, pdfData []byte, filename string) ([]grail.ImageOutput, error) {
-	res, err := client.GenerateImage(ctx, grail.ImageRequest{
-		Input: []grail.Part{
-			grail.Text("Create an infographic that summarizes the key concepts from this Bitcoin whitepaper. Make it visually appealing with clear sections, icons, and a modern design."),
-			grail.PDFWithFilename(pdfData, "application/pdf", filename),
+func generateImage(ctx context.Context, client grail.Client, pdfData []byte, filename string) ([]grail.ImageOutputInfo, error) {
+	pdfInput := grail.InputPDF(pdfData, grail.WithFileName(filename))
+
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("Create an infographic that summarizes the key concepts from this Bitcoin whitepaper. Make it visually appealing with clear sections, icons, and a modern design."),
+			pdfInput,
 		},
+		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return res.Images, nil
+	return res.ImageOutputs(), nil
 }
 
 func fetchPDF(ctx context.Context, urlStr string) ([]byte, error) {
@@ -211,7 +214,7 @@ func extractFilenameFromURL(urlStr string) string {
 }
 
 // saveImages writes all returned images to disk with numbered filenames.
-func saveImages(dir, base string, imgs []grail.ImageOutput) error {
+func saveImages(dir, base string, imgs []grail.ImageOutputInfo) error {
 	extFromMIME := func(mime string) string {
 		switch mime {
 		case "image/jpeg", "image/jpg":

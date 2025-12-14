@@ -8,8 +8,9 @@
 //		log.Fatal(err)
 //	}
 //	client := grail.NewClient(provider)
-//	res, err := client.GenerateText(ctx, grail.TextRequest{
-//		Input: []grail.Part{grail.Text("Hello, world!")},
+//	res, err := client.Generate(ctx, grail.Request{
+//		Inputs: []grail.Input{grail.InputText("Hello, world!")},
+//		Output: grail.OutputText(),
 //	})
 //
 // The provider automatically uses the GEMINI_API_KEY environment variable
@@ -22,6 +23,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -123,7 +125,7 @@ var ImageAspectRatios = map[string]ImageAspectRatio{
 	"3:2":  ImageAspectRatio3_2,
 	"3:4":  ImageAspectRatio3_4,
 	"4:3":  ImageAspectRatio4_3,
-	"4:5":  ImageAspectRatio4_5,
+	"4:5":  ImageAspectRatio5_4,
 	"5:4":  ImageAspectRatio5_4,
 	"9:16": ImageAspectRatio9_16,
 	"16:9": ImageAspectRatio16_9,
@@ -145,6 +147,25 @@ var ImageSizes = map[string]ImageSize{
 	"4K": ImageSize4K,
 }
 
+// TextOptions provides Gemini-specific text generation options.
+type TextOptions struct {
+	Model        string
+	MaxTokens    *int32
+	Temperature  *float32
+	TopP         *float32
+	SystemPrompt string
+}
+
+func (TextOptions) ApplyProviderOption() {}
+
+// ImageOptions provides Gemini-specific image generation options.
+type ImageOptions struct {
+	Model        string
+	SystemPrompt string
+}
+
+func (ImageOptions) ApplyProviderOption() {}
+
 // ImageOption mutates Gemini image generation settings.
 type ImageOption interface {
 	grail.ProviderOption
@@ -157,11 +178,10 @@ type imageConfig struct {
 }
 
 type imageOptionFunc struct {
-	desc string
-	fn   func(*imageConfig)
+	fn func(*imageConfig)
 }
 
-func (o imageOptionFunc) Description() string { return o.desc }
+func (o imageOptionFunc) ApplyProviderOption() {}
 func (o imageOptionFunc) apply(cfg *imageConfig) {
 	if o.fn != nil {
 		o.fn(cfg)
@@ -171,7 +191,6 @@ func (o imageOptionFunc) apply(cfg *imageConfig) {
 // WithImageAspectRatio sets the Gemini image aspect ratio.
 func WithImageAspectRatio(ratio ImageAspectRatio) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("gemini image aspect ratio %s", ratio),
 		fn: func(c *imageConfig) {
 			if ratio != "" {
 				c.aspectRatio = ratio
@@ -183,7 +202,6 @@ func WithImageAspectRatio(ratio ImageAspectRatio) ImageOption {
 // WithImageSize sets the Gemini image size.
 func WithImageSize(size ImageSize) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("gemini image size %s", size),
 		fn: func(c *imageConfig) {
 			if size != "" {
 				c.size = size
@@ -240,123 +258,241 @@ func (c *Provider) SetLogger(l *slog.Logger) {
 	}
 }
 
-// DefaultTextModel returns the configured/default text model.
-func (c *Provider) DefaultTextModel() string {
-	return c.textModel
+// Name returns the provider name.
+func (c *Provider) Name() string {
+	return "gemini"
 }
 
-// DefaultImageModel returns the configured/default image model.
-func (c *Provider) DefaultImageModel() string {
-	return c.imageModel
+// DoGenerate implements the ProviderExecutor interface.
+func (c *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
+	// Convert inputs to Gemini format
+	parts, err := c.toGenAIParts(req.Inputs)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("failed to convert inputs: %v", err)).WithCause(err).WithProviderName("gemini")
+	}
+
+	// Determine output type and route accordingly
+	if grail.IsTextOutput(req.Output) {
+		return c.generateText(ctx, req, parts)
+	}
+	if spec, isImage := grail.GetImageSpec(req.Output); isImage {
+		return c.generateImage(ctx, req, parts, spec)
+	}
+	if schema, strict, isJSON := grail.GetJSONOutput(req.Output); isJSON {
+		return c.generateJSON(ctx, req, parts, schema, strict)
+	}
+	return grail.Response{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("unsupported output type: %T", req.Output)).WithProviderName("gemini")
 }
 
-// GenerateText performs text generation using the configured Gemini text model.
-func (c *Provider) GenerateText(ctx context.Context, req grail.TextRequest) (grail.TextResult, error) {
-	if len(req.Input) == 0 {
-		return grail.TextResult{}, errors.New("input must not be empty")
-	}
-
-	parts, err := toGenAIParts(req.Input)
-	if err != nil {
-		return grail.TextResult{}, err
-	}
-
-	modelName := req.Options.Model
-	if modelName == "" {
-		modelName = c.textModel
-	}
-
-	c.log.Debug("generate text request", slog.String("model", modelName), slog.Any("options", req.Options), slog.Any("parts", summarizeParts(req.Input)))
-
-	config := &genai.GenerateContentConfig{}
-	applyTextOptions(config, req.Options)
-
-	contents := []*genai.Content{
-		genai.NewContentFromParts(parts, genai.RoleUser),
-	}
-
-	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
-	if err != nil {
-		return grail.TextResult{}, fmt.Errorf("generate text: %w", err)
-	}
-
-	return grail.TextResult{
-		Text: resp.Text(),
-		Raw:  resp,
-	}, nil
-}
-
-// GenerateImage performs image generation using the configured Gemini image model.
-func (c *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error) {
-	if len(req.Input) == 0 {
-		return grail.ImageResult{}, errors.New("input must not be empty")
-	}
-
-	parts, err := toGenAIParts(req.Input)
-	if err != nil {
-		return grail.ImageResult{}, err
-	}
-
-	modelName := req.Options.Model
-	if modelName == "" {
-		modelName = c.imageModel
-	}
-
-	c.log.Debug("generate image request", slog.String("model", modelName), slog.Any("options", req.Options), slog.Any("parts", summarizeParts(req.Input)))
-
-	config := &genai.GenerateContentConfig{}
-	applyImageOptions(config, req.Options, req.ProviderOptions)
-
-	contents := []*genai.Content{
-		genai.NewContentFromParts(parts, genai.RoleUser),
-	}
-
-	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
-	if err != nil {
-		return grail.ImageResult{}, fmt.Errorf("generate image: %w", err)
-	}
-
-	imgs := extractImages(resp)
-	c.log.Debug("generate image response", slog.Int("images", len(imgs)), slog.Any("raw", resp))
-
-	return grail.ImageResult{
-		Images: imgs,
-		Raw:    resp,
-	}, nil
-}
-
-func toGenAIParts(input []grail.Part) ([]*genai.Part, error) {
-	out := make([]*genai.Part, 0, len(input))
-	for i, p := range input {
-		switch v := p.(type) {
-		case grail.TextPart:
-			out = append(out, genai.NewPartFromText(v.Text))
-		case grail.ImagePart:
-			if len(v.Data) == 0 {
-				return nil, fmt.Errorf("part %d: image data is empty", i)
+func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []*genai.Part) (grail.Response, error) {
+	// Extract text options from provider options
+	var textOpts TextOptions
+	modelName := c.textModel
+	for _, opt := range req.ProviderOptions {
+		if to, ok := opt.(TextOptions); ok {
+			textOpts = to
+			if to.Model != "" {
+				modelName = to.Model
 			}
-			mime := v.MIME
-			if mime == "" {
-				mime = "image/png"
-			}
-			out = append(out, genai.NewPartFromBytes(v.Data, mime))
-		case grail.PDFPart:
-			if len(v.Data) == 0 {
-				return nil, fmt.Errorf("part %d: PDF data is empty", i)
-			}
-			mime := v.MIME
-			if mime == "" {
-				mime = "application/pdf"
-			}
-			out = append(out, genai.NewPartFromBytes(v.Data, mime))
-		default:
-			return nil, fmt.Errorf("part %d: unknown part type %T", i, p)
 		}
+	}
+
+	if c.log != nil {
+		c.log.Debug("generate text request", slog.String("model", modelName))
+	}
+
+	config := &genai.GenerateContentConfig{}
+	c.applyTextOptions(config, textOpts)
+
+	contents := []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("generate text failed: %v", err)).WithCause(err).WithProviderName("gemini").WithRetryable(isRetryableError(err))
+	}
+
+	text := resp.Text()
+	usage := extractUsage(resp)
+
+	if c.log != nil {
+		c.log.Debug("generate text response", slog.Any("usage", usage))
+	}
+
+	return grail.Response{
+		Outputs: []grail.OutputPart{
+			grail.NewTextOutputPart(text),
+		},
+		Usage: usage,
+		Provider: grail.ProviderInfo{
+			Name:  "gemini",
+			Route: "generate_content",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: modelName},
+			},
+		},
+		RequestID: "",
+		Warnings:  extractWarnings(resp),
+	}, nil
+}
+
+func (c *Provider) generateImage(ctx context.Context, req grail.Request, parts []*genai.Part, spec grail.ImageSpec) (grail.Response, error) {
+	// Extract image options from provider options
+	var imageOpts ImageOptions
+	modelName := c.imageModel
+	cfg := imageConfig{}
+
+	for _, opt := range req.ProviderOptions {
+		if io, ok := opt.(ImageOptions); ok {
+			imageOpts = io
+			if io.Model != "" {
+				modelName = io.Model
+			}
+		}
+		if imgOpt, ok := opt.(ImageOption); ok {
+			imgOpt.apply(&cfg)
+		}
+	}
+
+	if c.log != nil {
+		c.log.Debug("generate image request", slog.String("model", modelName))
+	}
+
+	config := &genai.GenerateContentConfig{}
+	c.applyImageOptions(config, imageOpts, &cfg)
+
+	contents := []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("generate image failed: %v", err)).WithCause(err).WithProviderName("gemini").WithRetryable(isRetryableError(err))
+	}
+
+	images := extractImages(resp)
+	usage := extractUsage(resp)
+
+	if c.log != nil {
+		c.log.Debug("generate image response", slog.Int("images", len(images)), slog.Any("usage", usage))
+	}
+
+	outputParts := make([]grail.OutputPart, 0, len(images))
+	for _, img := range images {
+		outputParts = append(outputParts, grail.NewImageOutputPart(img.Data, img.MIME, ""))
+	}
+
+	return grail.Response{
+		Outputs: outputParts,
+		Usage:   usage,
+		Provider: grail.ProviderInfo{
+			Name:  "gemini",
+			Route: "generate_content",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: modelName},
+				{Role: "image_generation", Name: modelName},
+			},
+		},
+		RequestID: "",
+		Warnings:  extractWarnings(resp),
+	}, nil
+}
+
+func (c *Provider) generateJSON(ctx context.Context, req grail.Request, parts []*genai.Part, schema any, strict bool) (grail.Response, error) {
+	// Extract text options from provider options
+	var textOpts TextOptions
+	modelName := c.textModel
+	for _, opt := range req.ProviderOptions {
+		if to, ok := opt.(TextOptions); ok {
+			textOpts = to
+			if to.Model != "" {
+				modelName = to.Model
+			}
+		}
+	}
+
+	if c.log != nil {
+		c.log.Debug("generate JSON request", slog.String("model", modelName))
+	}
+
+	config := &genai.GenerateContentConfig{}
+	c.applyTextOptions(config, textOpts)
+	// Note: Gemini may support JSON mode via response_mime_type or similar
+	// For now, we'll generate text and validate as JSON
+
+	contents := []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}
+
+	resp, err := c.client.Models.GenerateContent(ctx, modelName, contents, config)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("generate JSON failed: %v", err)).WithCause(err).WithProviderName("gemini").WithRetryable(isRetryableError(err))
+	}
+
+	text := resp.Text()
+	usage := extractUsage(resp)
+
+	// Validate JSON if strict mode
+	jsonBytes := []byte(text)
+	if strict {
+		var test any
+		if err := json.Unmarshal(jsonBytes, &test); err != nil {
+			return grail.Response{}, grail.NewGrailError(grail.OutputInvalid, fmt.Sprintf("invalid JSON output: %v", err)).WithProviderName("gemini")
+		}
+	}
+
+	if c.log != nil {
+		c.log.Debug("generate JSON response", slog.Any("usage", usage))
+	}
+
+	return grail.Response{
+		Outputs: []grail.OutputPart{
+			grail.NewJSONOutputPart(jsonBytes),
+		},
+		Usage: usage,
+		Provider: grail.ProviderInfo{
+			Name:  "gemini",
+			Route: "generate_content",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: modelName},
+			},
+		},
+		RequestID: "",
+		Warnings:  extractWarnings(resp),
+	}, nil
+}
+
+// toGenAIParts converts grail.Inputs to Gemini API format.
+func (c *Provider) toGenAIParts(inputs []grail.Input) ([]*genai.Part, error) {
+	out := make([]*genai.Part, 0, len(inputs))
+	for i, input := range inputs {
+		text, isText := grail.AsTextInput(input)
+		if isText {
+			out = append(out, genai.NewPartFromText(text))
+			continue
+		}
+
+		data, mime, _, isFile := grail.AsFileInput(input)
+		if isFile {
+			if len(data) == 0 {
+				return nil, fmt.Errorf("input %d: file data is empty", i)
+			}
+			if mime == "" {
+				mime = "application/octet-stream"
+			}
+			out = append(out, genai.NewPartFromBytes(data, mime))
+			continue
+		}
+
+		// FileReaderInput - read into memory for now
+		// TODO: support streaming if Gemini API supports it
+		return nil, fmt.Errorf("input %d: FileReaderInput not yet supported", i)
 	}
 	return out, nil
 }
 
-func applyTextOptions(config *genai.GenerateContentConfig, opts grail.TextOptions) {
+func (c *Provider) applyTextOptions(config *genai.GenerateContentConfig, opts TextOptions) {
 	if opts.SystemPrompt != "" {
 		config.SystemInstruction = &genai.Content{
 			Parts: []*genai.Part{
@@ -375,7 +511,7 @@ func applyTextOptions(config *genai.GenerateContentConfig, opts grail.TextOption
 	}
 }
 
-func applyImageOptions(config *genai.GenerateContentConfig, opts grail.ImageOptions, providerOpts []grail.ProviderOption) {
+func (c *Provider) applyImageOptions(config *genai.GenerateContentConfig, opts ImageOptions, imgCfg *imageConfig) {
 	if opts.SystemPrompt != "" {
 		config.SystemInstruction = &genai.Content{
 			Parts: []*genai.Part{
@@ -384,34 +520,27 @@ func applyImageOptions(config *genai.GenerateContentConfig, opts grail.ImageOpti
 		}
 	}
 
-	cfg := imageConfig{}
-	for _, opt := range providerOpts {
-		if fn, ok := opt.(ImageOption); ok && fn != nil {
-			fn.apply(&cfg)
-		}
-	}
-
 	// Apply image config if aspect ratio or size is set
-	if cfg.aspectRatio != "" || cfg.size != "" {
+	if imgCfg.aspectRatio != "" || imgCfg.size != "" {
 		config.ImageConfig = &genai.ImageConfig{}
-		if cfg.aspectRatio != "" {
-			config.ImageConfig.AspectRatio = string(cfg.aspectRatio)
+		if imgCfg.aspectRatio != "" {
+			config.ImageConfig.AspectRatio = string(imgCfg.aspectRatio)
 		}
-		if cfg.size != "" {
-			config.ImageConfig.ImageSize = string(cfg.size)
+		if imgCfg.size != "" {
+			config.ImageConfig.ImageSize = string(imgCfg.size)
 		}
 	}
 }
 
-func extractImages(resp *genai.GenerateContentResponse) []grail.ImageOutput {
-	var out []grail.ImageOutput
+func extractImages(resp *genai.GenerateContentResponse) []imageData {
+	var out []imageData
 	for _, cand := range resp.Candidates {
 		if cand == nil || cand.Content == nil {
 			continue
 		}
 		for _, part := range cand.Content.Parts {
 			if part.InlineData != nil {
-				out = append(out, grail.ImageOutput{
+				out = append(out, imageData{
 					Data: part.InlineData.Data,
 					MIME: part.InlineData.MIMEType,
 				})
@@ -421,33 +550,34 @@ func extractImages(resp *genai.GenerateContentResponse) []grail.ImageOutput {
 	return out
 }
 
-func summarizeParts(parts []grail.Part) []map[string]any {
-	var out []map[string]any
-	for _, p := range parts {
-		switch v := p.(type) {
-		case grail.TextPart:
-			out = append(out, map[string]any{
-				"type": "text",
-				"len":  len(v.Text),
-				"text": v.Text,
-			})
-		case grail.ImagePart:
-			out = append(out, map[string]any{
-				"type": "image",
-				"mime": v.MIME,
-				"len":  len(v.Data),
-			})
-		case grail.PDFPart:
-			out = append(out, map[string]any{
-				"type": "pdf",
-				"mime": v.MIME,
-				"len":  len(v.Data),
-			})
-		default:
-			out = append(out, map[string]any{
-				"type": fmt.Sprintf("unknown:%T", p),
-			})
-		}
+type imageData struct {
+	Data []byte
+	MIME string
+}
+
+func extractUsage(resp *genai.GenerateContentResponse) grail.Usage {
+	if resp == nil || resp.UsageMetadata == nil {
+		return grail.Usage{}
 	}
-	return out
+	return grail.Usage{
+		InputTokens:  int(resp.UsageMetadata.PromptTokenCount),
+		OutputTokens: int(resp.UsageMetadata.CandidatesTokenCount),
+		TotalTokens:  int(resp.UsageMetadata.TotalTokenCount),
+	}
+}
+
+func extractWarnings(resp *genai.GenerateContentResponse) []grail.Warning {
+	// Gemini SDK may not have warnings field in all versions
+	// Return empty slice for now
+	return nil
+}
+
+func isRetryableError(err error) bool {
+	// Gemini SDK errors that are retryable
+	errStr := err.Error()
+	return strings.Contains(errStr, "rate_limit") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "temporary") ||
+		strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "429")
 }

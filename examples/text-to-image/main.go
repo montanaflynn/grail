@@ -39,7 +39,7 @@ func main() {
 
 	type result struct {
 		provider string
-		images   []grail.ImageOutput
+		images   []grail.ImageOutputInfo
 		err      error
 	}
 
@@ -84,7 +84,7 @@ func main() {
 	}
 }
 
-func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName, envKey string) ([]grail.ImageOutput, error) {
+func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName, envKey string) ([]grail.ImageOutputInfo, error) {
 	var (
 		provider grail.Provider
 		err      error
@@ -108,20 +108,21 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	}
 
 	client := grail.NewClient(provider, grail.WithLogger(logger))
-	res, err := client.GenerateImage(ctx, grail.ImageRequest{
-		Input: []grail.Part{
-			grail.Text("An image of a cozy cabin in the woods at dusk, in watercolor style"),
-			grail.Text("With the words Merry Christmas written in the top right corner"),
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("An image of a cozy cabin in the woods at dusk, in watercolor style"),
+			grail.InputText("With the words Merry Christmas written in the top right corner"),
 		},
+		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return res.Images, nil
+	return res.ImageOutputs(), nil
 }
 
 // saveImages writes all returned images to disk with numbered filenames.
-func saveImages(dir, base string, imgs []grail.ImageOutput) error {
+func saveImages(dir, base string, imgs []grail.ImageOutputInfo) error {
 	extFromMIME := func(mime string) string {
 		switch mime {
 		case "image/jpeg", "image/jpg":

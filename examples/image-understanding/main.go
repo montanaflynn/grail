@@ -116,18 +116,20 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client, img)
 }
 
-func generateText(ctx context.Context, client *grail.Client, img []byte) (string, error) {
-	res, err := client.GenerateText(ctx, grail.TextRequest{
-		Input: []grail.Part{
-			grail.Text("Describe the style of this image."),
-			grail.Image(img, "image/png"),
-			grail.Text("Keep it short."),
+func generateText(ctx context.Context, client grail.Client, img []byte) (string, error) {
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("Describe the style of this image."),
+			grail.InputImage(img),
+			grail.InputText("Keep it short."),
 		},
+		Output: grail.OutputText(),
 	})
 	if err != nil {
 		return "", err
 	}
-	return res.Text, nil
+	text, _ := res.Text()
+	return text, nil
 }
 
 func fetchImage(ctx context.Context, url string) ([]byte, error) {

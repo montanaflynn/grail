@@ -8,8 +8,9 @@
 //		log.Fatal(err)
 //	}
 //	client := grail.NewClient(provider)
-//	res, err := client.GenerateText(ctx, grail.TextRequest{
-//		Input: []grail.Part{grail.Text("Hello, world!")},
+//	res, err := client.Generate(ctx, grail.Request{
+//		Inputs: []grail.Input{grail.InputText("Hello, world!")},
+//		Output: grail.OutputText(),
 //	})
 //
 // The provider automatically uses the OPENAI_API_KEY environment variable
@@ -23,6 +24,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -179,6 +181,25 @@ var ImageModerations = map[string]ImageModeration{
 	"low":  ImageModerationLow,
 }
 
+// TextOptions provides OpenAI-specific text generation options.
+type TextOptions struct {
+	Model        string
+	MaxTokens    *int32
+	Temperature  *float32
+	TopP         *float32
+	SystemPrompt string
+}
+
+func (TextOptions) ApplyProviderOption() {}
+
+// ImageOptions provides OpenAI-specific image generation options.
+type ImageOptions struct {
+	Model        string
+	SystemPrompt string
+}
+
+func (ImageOptions) ApplyProviderOption() {}
+
 // ImageOption mutates OpenAI image generation settings.
 type ImageOption interface {
 	grail.ProviderOption
@@ -194,11 +215,10 @@ type imageConfig struct {
 }
 
 type imageOptionFunc struct {
-	desc string
-	fn   func(*imageConfig)
+	fn func(*imageConfig)
 }
 
-func (o imageOptionFunc) Description() string { return o.desc }
+func (o imageOptionFunc) ApplyProviderOption() {}
 func (o imageOptionFunc) apply(cfg *imageConfig) {
 	if o.fn != nil {
 		o.fn(cfg)
@@ -208,7 +228,6 @@ func (o imageOptionFunc) apply(cfg *imageConfig) {
 // WithImageFormat sets the OpenAI image output format.
 func WithImageFormat(f ImageFormat) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("openai image format %s", f),
 		fn: func(c *imageConfig) {
 			if f != "" {
 				c.format = f
@@ -220,7 +239,6 @@ func WithImageFormat(f ImageFormat) ImageOption {
 // WithImageBackground sets the OpenAI image background mode.
 func WithImageBackground(b ImageBackground) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("openai image background %s", b),
 		fn: func(c *imageConfig) {
 			if b != "" {
 				c.background = b
@@ -232,7 +250,6 @@ func WithImageBackground(b ImageBackground) ImageOption {
 // WithImageSize sets the OpenAI image size.
 func WithImageSize(size ImageSize) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("openai image size %s", size),
 		fn: func(c *imageConfig) {
 			if size != "" {
 				c.size = size
@@ -244,7 +261,6 @@ func WithImageSize(size ImageSize) ImageOption {
 // WithImageModeration sets the OpenAI image moderation level.
 func WithImageModeration(moderation ImageModeration) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("openai image moderation %s", moderation),
 		fn: func(c *imageConfig) {
 			if moderation != "" {
 				c.moderation = moderation
@@ -256,7 +272,6 @@ func WithImageModeration(moderation ImageModeration) ImageOption {
 // WithImageOutputCompression sets the OpenAI image output compression (0-100% for JPEG/WebP).
 func WithImageOutputCompression(compression int) ImageOption {
 	return imageOptionFunc{
-		desc: fmt.Sprintf("openai image output compression %d%%", compression),
 		fn: func(c *imageConfig) {
 			if compression >= 0 && compression <= 100 {
 				comp := int64(compression)
@@ -311,34 +326,47 @@ func (p *Provider) SetLogger(l *slog.Logger) {
 	}
 }
 
-// DefaultTextModel returns the configured/default text model.
-func (p *Provider) DefaultTextModel() string {
-	return p.textModel
+// Name returns the provider name.
+func (p *Provider) Name() string {
+	return "openai"
 }
 
-// DefaultImageModel returns the configured/default image model.
-func (p *Provider) DefaultImageModel() string {
-	return p.imageModel
-}
-
-// GenerateText performs text generation using OpenAI chat completions.
-func (p *Provider) GenerateText(ctx context.Context, req grail.TextRequest) (grail.TextResult, error) {
-	if len(req.Input) == 0 {
-		return grail.TextResult{}, errors.New("input must not be empty")
-	}
-
-	item, err := toResponseInput(req.Input)
+// DoGenerate implements the ProviderExecutor interface.
+func (p *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
+	// Convert inputs to OpenAI format
+	item, err := p.toResponseInput(req.Inputs)
 	if err != nil {
-		return grail.TextResult{}, err
+		return grail.Response{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("failed to convert inputs: %v", err)).WithCause(err).WithProviderName("openai")
 	}
 
-	model := req.Options.Model
-	if model == "" {
-		model = p.textModel
+	// Determine output type and route accordingly
+	if grail.IsTextOutput(req.Output) {
+		return p.generateText(ctx, req, item)
+	}
+	if spec, isImage := grail.GetImageSpec(req.Output); isImage {
+		return p.generateImage(ctx, req, item, spec)
+	}
+	if schema, strict, isJSON := grail.GetJSONOutput(req.Output); isJSON {
+		return p.generateJSON(ctx, req, item, schema, strict)
+	}
+	return grail.Response{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("unsupported output type: %T", req.Output)).WithProviderName("openai")
+}
+
+func (p *Provider) generateText(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam) (grail.Response, error) {
+	// Extract text options from provider options
+	var textOpts TextOptions
+	model := p.textModel
+	for _, opt := range req.ProviderOptions {
+		if to, ok := opt.(TextOptions); ok {
+			textOpts = to
+			if to.Model != "" {
+				model = to.Model
+			}
+		}
 	}
 
 	if p.log != nil {
-		p.log.Debug("openai generate text request", slog.String("model", model), slog.Any("options", req.Options), slog.Any("parts_summary", summarizeParts(req.Input)))
+		p.log.Debug("openai generate text request", slog.String("model", model))
 	}
 
 	params := responses.ResponseNewParams{
@@ -348,66 +376,74 @@ func (p *Provider) GenerateText(ctx context.Context, req grail.TextRequest) (gra
 		},
 	}
 
-	if req.Options.SystemPrompt != "" {
-		params.Instructions = param.NewOpt(req.Options.SystemPrompt)
+	if textOpts.SystemPrompt != "" {
+		params.Instructions = param.NewOpt(textOpts.SystemPrompt)
 	}
-	if req.Options.MaxTokens != nil {
-		params.MaxOutputTokens = openai.Int(int64(*req.Options.MaxTokens))
+	if textOpts.MaxTokens != nil {
+		params.MaxOutputTokens = openai.Int(int64(*textOpts.MaxTokens))
 	}
-	if req.Options.Temperature != nil {
-		params.Temperature = openai.Float(float64(*req.Options.Temperature))
+	if textOpts.Temperature != nil {
+		params.Temperature = openai.Float(float64(*textOpts.Temperature))
 	}
-	if req.Options.TopP != nil {
-		params.TopP = openai.Float(float64(*req.Options.TopP))
+	if textOpts.TopP != nil {
+		params.TopP = openai.Float(float64(*textOpts.TopP))
 	}
 
 	resp, err := p.client.Responses.New(ctx, params)
 	if err != nil {
-		return grail.TextResult{}, fmt.Errorf("openai generate text: %w", err)
+		ge := grail.NewGrailError(grail.Internal, fmt.Sprintf("openai generate text failed: %v", err)).WithCause(err).WithProviderName("openai").WithRetryable(isRetryableError(err))
+		return grail.Response{}, ge
 	}
 
 	text := resp.OutputText()
+	usage := extractUsage(resp)
 
 	if p.log != nil {
-		p.log.Debug("openai generate text response", slog.Any("raw", resp))
+		p.log.Debug("openai generate text response", slog.Any("usage", usage))
 	}
 
-	return grail.TextResult{
-		Text: text,
-		Raw:  resp,
+	return grail.Response{
+		Outputs: []grail.OutputPart{
+			grail.NewTextOutputPart(text),
+		},
+		Usage: usage,
+		Provider: grail.ProviderInfo{
+			Name:  "openai",
+			Route: "responses",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: model},
+			},
+		},
+		RequestID: resp.ID,
+		Warnings:  extractWarnings(resp),
 	}, nil
 }
 
-// GenerateImage performs image generation using OpenAI Responses API.
-func (p *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error) {
-	if len(req.Input) == 0 {
-		return grail.ImageResult{}, errors.New("input must not be empty")
-	}
-
-	item, err := toResponseInput(req.Input)
-	if err != nil {
-		return grail.ImageResult{}, err
-	}
-
-	model := req.Options.Model
-	if model == "" {
-		model = p.textModel
-	}
-
-	if p.log != nil {
-		p.log.Debug("openai generate image request", slog.String("model", model), slog.Any("parts_summary", summarizeParts(req.Input)))
-	}
-
+func (p *Provider) generateImage(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam, spec grail.ImageSpec) (grail.Response, error) {
+	// Extract image options from provider options
+	var imageOpts ImageOptions
+	model := p.textModel
 	cfg := imageConfig{
 		format:     ImageFormat(p.imgFormat),
-		background: ImageBackground("auto"),
+		background: ImageBackgroundAuto,
 		size:       ImageSizeAuto,
 		moderation: ImageModerationAuto,
 	}
+
 	for _, opt := range req.ProviderOptions {
-		if fn, ok := opt.(ImageOption); ok && fn != nil {
-			fn.apply(&cfg)
+		if io, ok := opt.(ImageOptions); ok {
+			imageOpts = io
+			if io.Model != "" {
+				model = io.Model
+			}
 		}
+		if imgOpt, ok := opt.(ImageOption); ok {
+			imgOpt.apply(&cfg)
+		}
+	}
+
+	if p.log != nil {
+		p.log.Debug("openai generate image request", slog.String("model", model))
 	}
 
 	size := string(cfg.size)
@@ -449,102 +485,187 @@ func (p *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (g
 		},
 	}
 
-	if req.Options.SystemPrompt != "" {
-		params.Instructions = param.NewOpt(req.Options.SystemPrompt)
+	if imageOpts.SystemPrompt != "" {
+		params.Instructions = param.NewOpt(imageOpts.SystemPrompt)
 	}
 
 	resp, err := p.client.Responses.New(ctx, params)
 	if err != nil {
-		return grail.ImageResult{}, fmt.Errorf("openai generate image: %w", err)
+		ge := grail.NewGrailError(grail.Internal, fmt.Sprintf("openai generate image failed: %v", err)).WithCause(err).WithProviderName("openai").WithRetryable(isRetryableError(err))
+		return grail.Response{}, ge
 	}
 
-	imgs := extractImagesFromResponse(resp, string(cfg.format))
+	images := extractImagesFromResponse(resp, string(cfg.format))
+	usage := extractUsage(resp)
 
 	if p.log != nil {
-		p.log.Debug("openai generate image response", slog.Int("images", len(imgs)), slog.Any("raw", resp))
+		p.log.Debug("openai generate image response", slog.Int("images", len(images)), slog.Any("usage", usage))
 	}
 
-	return grail.ImageResult{
-		Images: imgs,
-		Raw:    resp,
+	outputParts := make([]grail.OutputPart, 0, len(images))
+	for _, img := range images {
+		outputParts = append(outputParts, grail.NewImageOutputPart(img.Data, img.MIME, ""))
+	}
+
+	return grail.Response{
+		Outputs: outputParts,
+		Usage:   usage,
+		Provider: grail.ProviderInfo{
+			Name:  "openai",
+			Route: "responses",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: model},
+				{Role: "image_generation", Name: p.imageModel},
+			},
+		},
+		RequestID: resp.ID,
+		Warnings:  extractWarnings(resp),
 	}, nil
 }
 
-func toChatParts(input []grail.Part) ([]openai.ChatCompletionContentPartUnionParam, error) {
-	out := make([]openai.ChatCompletionContentPartUnionParam, 0, len(input))
-	for i, p := range input {
-		switch v := p.(type) {
-		case grail.TextPart:
-			out = append(out, openai.TextContentPart(v.Text))
-		case grail.ImagePart:
-			if len(v.Data) == 0 {
-				return nil, fmt.Errorf("part %d: image data is empty", i)
+func (p *Provider) generateJSON(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam, schema any, strict bool) (grail.Response, error) {
+	// JSON output is similar to text, but with response format
+	var textOpts TextOptions
+	model := p.textModel
+	for _, opt := range req.ProviderOptions {
+		if to, ok := opt.(TextOptions); ok {
+			textOpts = to
+			if to.Model != "" {
+				model = to.Model
 			}
-			mime := v.MIME
-			if mime == "" {
-				mime = "image/png"
-			}
-			b64 := base64.StdEncoding.EncodeToString(v.Data)
-			url := fmt.Sprintf("data:%s;base64,%s", mime, b64)
-			out = append(out, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-				URL: url,
-			}))
-		default:
-			return nil, fmt.Errorf("part %d: unknown part type %T", i, p)
 		}
 	}
-	return out, nil
+
+	if p.log != nil {
+		p.log.Debug("openai generate JSON request", slog.String("model", model))
+	}
+
+	params := responses.ResponseNewParams{
+		Model: shared.ChatModel(model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: responses.ResponseInputParam{item},
+		},
+		// Note: JSON mode may not be available in all SDK versions
+		// If ResponseFormat is not available, we'll validate JSON manually
+	}
+
+	if textOpts.SystemPrompt != "" {
+		params.Instructions = param.NewOpt(textOpts.SystemPrompt)
+	}
+	if textOpts.MaxTokens != nil {
+		params.MaxOutputTokens = openai.Int(int64(*textOpts.MaxTokens))
+	}
+	if textOpts.Temperature != nil {
+		params.Temperature = openai.Float(float64(*textOpts.Temperature))
+	}
+	if textOpts.TopP != nil {
+		params.TopP = openai.Float(float64(*textOpts.TopP))
+	}
+
+	resp, err := p.client.Responses.New(ctx, params)
+	if err != nil {
+		ge := grail.NewGrailError(grail.Internal, fmt.Sprintf("openai generate JSON failed: %v", err)).WithCause(err).WithProviderName("openai").WithRetryable(isRetryableError(err))
+		return grail.Response{}, ge
+	}
+
+	text := resp.OutputText()
+	usage := extractUsage(resp)
+
+	// Validate JSON if strict mode
+	jsonBytes := []byte(text)
+	if strict {
+		var test any
+		if err := json.Unmarshal(jsonBytes, &test); err != nil {
+			return grail.Response{}, grail.NewGrailError(grail.OutputInvalid, fmt.Sprintf("invalid JSON output: %v", err)).WithProviderName("openai")
+		}
+	}
+
+	if p.log != nil {
+		p.log.Debug("openai generate JSON response", slog.Any("usage", usage))
+	}
+
+	return grail.Response{
+		Outputs: []grail.OutputPart{
+			grail.NewJSONOutputPart(jsonBytes),
+		},
+		Usage: usage,
+		Provider: grail.ProviderInfo{
+			Name:  "openai",
+			Route: "responses",
+			Models: []grail.ModelUse{
+				{Role: "language", Name: model},
+			},
+		},
+		RequestID: resp.ID,
+		Warnings:  extractWarnings(resp),
+	}, nil
 }
 
-// toResponseInput flattens ordered parts into a single user message for Responses.
-func toResponseInput(input []grail.Part) (responses.ResponseInputItemUnionParam, error) {
-	content := make(responses.ResponseInputMessageContentListParam, 0, len(input))
-	for i, p := range input {
-		switch v := p.(type) {
-		case grail.TextPart:
+// toResponseInput converts grail.Inputs to OpenAI Response API format.
+func (p *Provider) toResponseInput(inputs []grail.Input) (responses.ResponseInputItemUnionParam, error) {
+	content := make(responses.ResponseInputMessageContentListParam, 0, len(inputs))
+	for i, input := range inputs {
+		text, isText := grail.AsTextInput(input)
+		if isText {
 			content = append(content, responses.ResponseInputContentUnionParam{
 				OfInputText: &responses.ResponseInputTextParam{
-					Text: v.Text,
+					Text: text,
 				},
 			})
-		case grail.ImagePart:
-			if len(v.Data) == 0 {
-				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: image data is empty", i)
+			continue
+		}
+
+		data, mime, name, isFile := grail.AsFileInput(input)
+		if isFile {
+			if len(data) == 0 {
+				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("input %d: file data is empty", i)
 			}
-			mime := v.MIME
-			if mime == "" {
-				mime = "image/png"
+
+			// Handle images
+			if strings.HasPrefix(mime, "image/") {
+				if mime == "" {
+					mime = "image/png"
+				}
+				b64 := base64.StdEncoding.EncodeToString(data)
+				dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
+				content = append(content, responses.ResponseInputContentUnionParam{
+					OfInputImage: &responses.ResponseInputImageParam{
+						Detail:   responses.ResponseInputImageDetailAuto,
+						ImageURL: openai.String(dataURL),
+					},
+				})
+				continue
 			}
-			b64 := base64.StdEncoding.EncodeToString(v.Data)
+
+			// Handle PDFs
+			if mime == "application/pdf" {
+				// Validate PDF magic bytes
+				if len(data) < 4 || string(data[0:4]) != "%PDF" {
+					return responses.ResponseInputItemUnionParam{}, fmt.Errorf("input %d: invalid PDF data (missing PDF header)", i)
+				}
+				b64 := base64.StdEncoding.EncodeToString(data)
+				dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
+				filename := name
+				if filename == "" {
+					filename = "document.pdf"
+				}
+				content = append(content, responses.ResponseInputContentUnionParam{
+					OfInputFile: &responses.ResponseInputFileParam{
+						FileData: param.NewOpt(dataURL),
+						Filename: param.NewOpt(filename),
+						Type:     constant.InputFile("").Default(),
+					},
+				})
+				continue
+			}
+
+			// Other file types - treat as generic file
+			b64 := base64.StdEncoding.EncodeToString(data)
 			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
-			content = append(content, responses.ResponseInputContentUnionParam{
-				OfInputImage: &responses.ResponseInputImageParam{
-					Detail:   responses.ResponseInputImageDetailAuto,
-					ImageURL: openai.String(dataURL),
-				},
-			})
-		case grail.PDFPart:
-			if len(v.Data) == 0 {
-				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: PDF data is empty", i)
-			}
-			// Validate PDF magic bytes
-			if len(v.Data) < 4 || string(v.Data[0:4]) != "%PDF" {
-				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: invalid PDF data (missing PDF header)", i)
-			}
-			mime := v.MIME
-			if mime == "" {
-				mime = "application/pdf"
-			}
-			// Encode to base64
-			b64 := base64.StdEncoding.EncodeToString(v.Data)
-			// FileData should be a data URL: "data:application/pdf;base64,<base64>"
-			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
-			// Use provided filename or default to "document.pdf"
-			filename := v.Filename
+			filename := name
 			if filename == "" {
-				filename = "document.pdf"
+				filename = "file"
 			}
-			// Type must be "input_file" constant
 			content = append(content, responses.ResponseInputContentUnionParam{
 				OfInputFile: &responses.ResponseInputFileParam{
 					FileData: param.NewOpt(dataURL),
@@ -552,9 +673,12 @@ func toResponseInput(input []grail.Part) (responses.ResponseInputItemUnionParam,
 					Type:     constant.InputFile("").Default(),
 				},
 			})
-		default:
-			return responses.ResponseInputItemUnionParam{}, fmt.Errorf("part %d: unknown part type %T", i, p)
+			continue
 		}
+
+		// FileReaderInput - read into memory for now
+		// TODO: support streaming if OpenAI API supports it
+		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("input %d: FileReaderInput not yet supported", i)
 	}
 
 	return responses.ResponseInputItemUnionParam{
@@ -566,17 +690,17 @@ func toResponseInput(input []grail.Part) (responses.ResponseInputItemUnionParam,
 	}, nil
 }
 
-func extractImagesFromResponse(resp *responses.Response, outputFormat string) []grail.ImageOutput {
+func extractImagesFromResponse(resp *responses.Response, outputFormat string) []imageData {
 	if resp == nil {
 		return nil
 	}
 	mime := mimeFromFormat(outputFormat)
-	var out []grail.ImageOutput
+	var out []imageData
 	for _, item := range resp.Output {
 		if item.Type == "image_generation_call" && item.Result != "" {
 			buf, err := base64.StdEncoding.DecodeString(item.Result)
 			if err == nil {
-				out = append(out, grail.ImageOutput{
+				out = append(out, imageData{
 					Data: buf,
 					MIME: mime,
 				})
@@ -584,6 +708,11 @@ func extractImagesFromResponse(resp *responses.Response, outputFormat string) []
 		}
 	}
 	return out
+}
+
+type imageData struct {
+	Data []byte
+	MIME string
 }
 
 func mimeFromFormat(format string) string {
@@ -597,32 +726,34 @@ func mimeFromFormat(format string) string {
 	}
 }
 
-func summarizeParts(parts []grail.Part) []map[string]any {
-	var out []map[string]any
-	for _, p := range parts {
-		switch v := p.(type) {
-		case grail.TextPart:
-			out = append(out, map[string]any{
-				"type": "text",
-				"len":  len(v.Text),
-			})
-		case grail.ImagePart:
-			out = append(out, map[string]any{
-				"type": "image",
-				"mime": v.MIME,
-				"len":  len(v.Data),
-			})
-		case grail.PDFPart:
-			out = append(out, map[string]any{
-				"type": "pdf",
-				"mime": v.MIME,
-				"len":  len(v.Data),
-			})
-		default:
-			out = append(out, map[string]any{
-				"type": "unknown",
-			})
-		}
+func extractUsage(resp *responses.Response) grail.Usage {
+	if resp == nil {
+		return grail.Usage{}
 	}
-	return out
+	// Check if Usage field exists and has values
+	usage := resp.Usage
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 {
+		return grail.Usage{}
+	}
+	return grail.Usage{
+		InputTokens:  int(usage.InputTokens),
+		OutputTokens: int(usage.OutputTokens),
+		TotalTokens:  int(usage.TotalTokens),
+	}
+}
+
+func extractWarnings(resp *responses.Response) []grail.Warning {
+	// OpenAI SDK may not have Warnings field in all versions
+	// Return empty slice for now
+	return nil
+}
+
+func isRetryableError(err error) bool {
+	// OpenAI SDK errors that are retryable
+	errStr := err.Error()
+	return strings.Contains(errStr, "rate_limit") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "temporary") ||
+		strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "429")
 }
