@@ -11,8 +11,7 @@ import (
 
 // Minimal text generation:
 // - Defaults: uses provider default model (gpt-5.1 for OpenAI), default logger, API key from OPENAI_API_KEY.
-// - Uncomment the logger options and TextOptions blocks below to customize.
-// - For images, ImageRequest supports ProviderOptions (e.g., openai.WithImageFormat/WithImageBackground).
+// - Uncomment the logger options and provider options blocks below to customize.
 func main() {
 	ctx := context.Background()
 
@@ -35,29 +34,28 @@ func main() {
 		// grail.WithLoggerFormat("json", grail.LoggerLevels["debug"]),
 	)
 
-	res, err := client.GenerateText(ctx, grail.TextRequest{
-		Input: []grail.Part{
-			grail.Text("Say hello in one short sentence."),
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("Say hello in one short sentence."),
 		},
-		// Options: grail.TextOptions{
-		// 	Model:        "gpt-5.1",
-		// 	MaxTokens:    grail.Pointer[int32](32),
-		// 	Temperature:  grail.Pointer[float32](0.4),
-		// 	TopP:         grail.Pointer[float32](0.9),
-		// 	SystemPrompt: "You are brief and friendly.",
-		// },
+		Output: grail.OutputText(),
 		// ProviderOptions: []grail.ProviderOption{
-		// 	// Provider-specific knobs (e.g., OpenAI image options):
-		// 	// openai.WithImageFormat(openai.ImageFormatPNG),
-		// 	// openai.WithImageBackground(openai.ImageBackgroundTransparent),
+		// 	openai.TextOptions{
+		// 		Model:        "gpt-5.1",
+		// 		MaxTokens:    grail.Pointer[int32](32),
+		// 		Temperature:  grail.Pointer[float32](0.4),
+		// 		TopP:         grail.Pointer[float32](0.9),
+		// 		SystemPrompt: "You are brief and friendly.",
+		// 	},
 		// },
 	})
 	if err != nil {
-		if grail.IsCode(err, grail.CodeInvalidInput) {
+		if grail.GetErrorCode(err) == grail.InvalidArgument {
 			log.Fatalf("fix request: %v", err)
 		}
 		log.Fatalf("generate text: %v", err)
 	}
 
-	fmt.Println(res.Text)
+	text, _ := res.Text()
+	fmt.Println(text)
 }

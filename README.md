@@ -3,7 +3,7 @@
 ![CI](https://img.shields.io/github/actions/workflow/status/montanaflynn/grail/ci.yml)
 [![Go Reference](https://img.shields.io/badge/go.dev-reference-00ADD8)](https://pkg.go.dev/github.com/montanaflynn/grail)
 
-A lightweight Go SDK that unifies multiple AI providers behind a consistent interface for text and image generation. 
+A lightweight Go SDK that unifies multiple AI providers behind a consistent interface for text and image generation.
 
 ## Design Goals
 
@@ -29,21 +29,26 @@ provider, _ := openai.New()
 client := grail.NewClient(provider)
 
 // Generate text
-res, _ := client.GenerateText(ctx, grail.TextRequest{
-	Input: []grail.Part{grail.Text("Create a haiku")},
+res, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{grail.InputText("Create a haiku")},
+	Output: grail.OutputText(),
 })
-fmt.Println(res.Text)
+text, _ := res.Text()
+fmt.Println(text)
 
 // Generate image
-imgRes, _ := client.GenerateImage(ctx, grail.ImageRequest{
-	Input: []grail.Part{grail.Text("A beautiful sunset")},
+imgRes, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{grail.InputText("A beautiful sunset")},
+	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 })
-os.WriteFile("sunset.png", imgRes.Images[0].Data, 0644)
+imgs, _ := imgRes.Images()
+os.WriteFile("sunset.png", imgs[0], 0644)
 
 // Generate image with provider-specific options
 import "github.com/montanaflynn/grail/providers/gemini"
-imgRes2, _ := client.GenerateImage(ctx, grail.ImageRequest{
-	Input: []grail.Part{grail.Text("A landscape photo")},
+imgRes2, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{grail.InputText("A landscape photo")},
+	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 	ProviderOptions: []grail.ProviderOption{
 		gemini.WithImageAspectRatio(gemini.ImageAspectRatio16_9),
 		gemini.WithImageSize(gemini.ImageSize2K),
@@ -52,33 +57,40 @@ imgRes2, _ := client.GenerateImage(ctx, grail.ImageRequest{
 
 // Image understanding (text from image)
 imgData, _ := os.ReadFile("photo.jpg")
-textRes, _ := client.GenerateText(ctx, grail.TextRequest{
-	Input: []grail.Part{
-		grail.Text("Describe this image"),
-		grail.Image(imgData, "image/jpeg"),
+imgInput := grail.InputImage(imgData)
+textRes, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{
+		grail.InputText("Describe this image"),
+		imgInput,
 	},
+	Output: grail.OutputText(),
 })
-fmt.Println(textRes.Text)
+text, _ := textRes.Text()
+fmt.Println(text)
 
 // Multimodal image generation (image from text + image)
-imgRes2, _ := client.GenerateImage(ctx, grail.ImageRequest{
-	Input: []grail.Part{
-		grail.Text("Create a variation of this image"),
-		grail.Image(imgData, "image/jpeg"),
-		grail.Text("but make it more colorful"),
+imgRes3, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{
+		grail.InputText("Create a variation of this image"),
+		imgInput,
+		grail.InputText("but make it more colorful"),
 	},
+	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 })
-os.WriteFile("variation.png", imgRes2.Images[0].Data, 0644)
+imgs, _ := imgRes3.Images()
+os.WriteFile("variation.png", imgs[0], 0644)
 
 // PDF understanding (text from PDF)
 pdfData, _ := os.ReadFile("document.pdf")
-pdfRes, _ := client.GenerateText(ctx, grail.TextRequest{
-	Input: []grail.Part{
-		grail.Text("Summarize this document"),
-		grail.PDF(pdfData, "application/pdf"),
+pdfRes, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{
+		grail.InputText("Summarize this document"),
+		grail.InputPDF(pdfData),
 	},
+	Output: grail.OutputText(),
 })
-fmt.Println(pdfRes.Text)
+text, _ := pdfRes.Text()
+fmt.Println(text)
 ```
 
 ## Examples
@@ -108,7 +120,7 @@ provider, err := openai.New()
 provider, err := openai.New(
     openai.WithAPIKey("sk-..."),
     openai.WithTextModel("gpt-4"),
-    openai.WithImageModel("dall-e-3"),
+    openai.WithImageModel("gpt-image-1"),
     openai.WithLogger(logger),
 )
 ```
@@ -125,7 +137,10 @@ provider, err := openai.New(
 - `WithImageBackground(bg ImageBackground)` - Set background (`auto`, `transparent`, `opaque`)
 - `WithImageSize(size ImageSize)` - Set image size (`auto`, `1024x1024`, `1536x1024`, `1024x1536`, `256x256`, `512x512`, `1792x1024`, `1024x1792`)
 - `WithImageModeration(moderation ImageModeration)` - Set moderation level (`auto`, `low`)
-- `WithImageOutputCompression(compression int64)` - Set output compression quality (0-100)
+- `WithImageOutputCompression(compression int)` - Set output compression quality (0-100)
+
+**Text Options:**
+- `TextOptions{Model, MaxTokens, Temperature, TopP, SystemPrompt}` - Provider-specific text generation options
 
 ### Gemini
 
@@ -150,6 +165,13 @@ provider, err := gemini.New(ctx,
 - `WithTextModel(model string)` - Override default text model (default: `gemini-2.5-flash`)
 - `WithImageModel(model string)` - Override default image model (default: `gemini-2.5-flash-image`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
+
+**Image Options:**
+- `WithImageAspectRatio(ratio ImageAspectRatio)` - Set aspect ratio (`1:1`, `16:9`, etc.)
+- `WithImageSize(size ImageSize)` - Set image size (`1K`, `2K`, `4K`)
+
+**Text Options:**
+- `TextOptions{Model, MaxTokens, Temperature, TopP, SystemPrompt}` - Provider-specific text generation options
 
 ## Links
 

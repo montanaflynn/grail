@@ -7,9 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -20,8 +18,6 @@ import (
 	"github.com/montanaflynn/grail/providers/openai"
 )
 
-const defaultPDFURL = "https://bitcoin.org/bitcoin.pdf"
-
 // Demonstrates text generation from PDF input.
 func main() {
 	ctx := context.Background()
@@ -29,14 +25,8 @@ func main() {
 	openaiFlag := flag.Bool("openai", false, "use OpenAI provider")
 	geminiFlag := flag.Bool("gemini", false, "use Gemini provider")
 	debugFlag := flag.Bool("debug", false, "enable debug logging")
-	pdfPath := flag.String("path", "", "path to PDF file (mutually exclusive with -url)")
-	pdfURL := flag.String("url", "", "URL to PDF file (mutually exclusive with -path)")
+	urlFlag := flag.String("url", "", "PDF URL to fetch (optional)")
 	flag.Parse()
-
-	// Validate mutually exclusive flags
-	if *pdfPath != "" && *pdfURL != "" {
-		log.Fatal("cannot specify both -path and -url flags")
-	}
 
 	level := slog.LevelInfo
 	if *debugFlag {
@@ -46,34 +36,27 @@ func main() {
 		Level: level,
 	}))
 
+	runOpenAI := *openaiFlag
+	runGemini := *geminiFlag || (!*openaiFlag && !*geminiFlag)
+
 	var pdfData []byte
 	var filename string
 	var err error
 
-	if *pdfPath != "" {
-		// Read from file path
-		pdfData, err = os.ReadFile(*pdfPath)
+	if *urlFlag != "" {
+		pdfData, err = fetchPDF(ctx, *urlFlag)
 		if err != nil {
-			log.Fatalf("read PDF file: %v", err)
+			log.Fatalf("fetch PDF: %v", err)
 		}
-		// Extract filename from path
-		filename = filepath.Base(*pdfPath)
+		filename = extractFilenameFromURL(*urlFlag)
 	} else {
-		// Use URL (default or provided)
-		url := *pdfURL
-		if url == "" {
-			url = defaultPDFURL
-		}
-		pdfData, err = fetchPDF(ctx, url)
+		// Use a sample PDF URL
+		pdfData, err = fetchPDF(ctx, "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf")
 		if err != nil {
-			log.Fatalf("fetch PDF from URL: %v", err)
+			log.Fatalf("fetch PDF: %v", err)
 		}
-		// Extract filename from URL
-		filename = extractFilenameFromURL(url)
+		filename = "dummy.pdf"
 	}
-
-	runOpenAI := *openaiFlag
-	runGemini := *geminiFlag || (!*openaiFlag && !*geminiFlag)
 
 	type result struct {
 		provider string
@@ -149,17 +132,21 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client, pdfData, filename)
 }
 
-func generateText(ctx context.Context, client *grail.Client, pdfData []byte, filename string) (string, error) {
-	res, err := client.GenerateText(ctx, grail.TextRequest{
-		Input: []grail.Part{
-			grail.Text("Summarize the key points from this document."),
-			grail.PDFWithFilename(pdfData, "application/pdf", filename),
+func generateText(ctx context.Context, client grail.Client, pdfData []byte, filename string) (string, error) {
+	pdfInput := grail.InputPDF(pdfData, grail.WithFileName(filename))
+
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("Summarize the key points from this document."),
+			pdfInput,
 		},
+		Output: grail.OutputText(),
 	})
 	if err != nil {
 		return "", err
 	}
-	return res.Text, nil
+	text, _ := res.Text()
+	return text, nil
 }
 
 func fetchPDF(ctx context.Context, urlStr string) ([]byte, error) {
@@ -179,31 +166,13 @@ func fetchPDF(ctx context.Context, urlStr string) ([]byte, error) {
 }
 
 func extractFilenameFromURL(urlStr string) string {
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return "document.pdf"
-	}
-
-	// Get filename from path
-	path := parsedURL.Path
-	if path == "" || path == "/" {
-		return "document.pdf"
-	}
-
-	// Extract the last component of the path
-	filename := filepath.Base(path)
-
-	// If it doesn't end with .pdf, add it
-	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
-		if filename == "" || filename == "." {
-			return "document.pdf"
+	// Simple extraction - in practice you might want more robust parsing
+	parts := strings.Split(urlStr, "/")
+	if len(parts) > 0 {
+		last := parts[len(parts)-1]
+		if strings.Contains(last, ".") {
+			return last
 		}
-		return filename + ".pdf"
 	}
-
-	if filename == "" {
-		return "document.pdf"
-	}
-
-	return filename
+	return "document.pdf"
 }

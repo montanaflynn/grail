@@ -42,14 +42,15 @@ func main() {
 
 	client := grail.NewClient(provider, grail.WithLogger(logger))
 
-	res, err := client.GenerateImage(ctx, grail.ImageRequest{
-		Input: []grail.Part{
-			grail.Text("An owl logo icon for a childrens clothing brand"),
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{
+			grail.InputText("An owl logo icon for a childrens clothing brand"),
 		},
-		Options: grail.ImageOptions{
-			SystemPrompt: "You're an experienced logo illustrator.",
-		},
+		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
 		ProviderOptions: []grail.ProviderOption{
+			gemini.ImageOptions{
+				SystemPrompt: "You're an experienced logo illustrator.",
+			},
 			gemini.WithImageAspectRatio(gemini.ImageAspectRatios[strings.ToLower(*aspectRatioFlag)]),
 			gemini.WithImageSize(gemini.ImageSizes[strings.ToUpper(*sizeFlag)]),
 		},
@@ -58,17 +59,32 @@ func main() {
 		log.Fatalf("generate image: %v", err)
 	}
 
-	if len(res.Images) == 0 {
+	imgInfos := res.ImageOutputs()
+	if len(imgInfos) == 0 {
 		fmt.Println("no image returned")
 		return
 	}
 
-	if err := saveImages("examples-output", "gemini-image-options", res.Images); err != nil {
+	// Convert to imageOutput format for saveImages function
+	imgOutputs := make([]imageOutput, len(imgInfos))
+	for i, info := range imgInfos {
+		imgOutputs[i] = imageOutput{
+			Data: info.Data,
+			MIME: info.MIME,
+		}
+	}
+
+	if err := saveImages("examples-output", "gemini-image-options", imgOutputs); err != nil {
 		log.Fatalf("save images: %v", err)
 	}
 }
 
-func saveImages(dir, base string, imgs []grail.ImageOutput) error {
+type imageOutput struct {
+	Data []byte
+	MIME string
+}
+
+func saveImages(dir, base string, imgs []imageOutput) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("make output dir: %w", err)
 	}

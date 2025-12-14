@@ -5,66 +5,44 @@
 // Example usage:
 //
 //	provider := &mock.Provider{}
-//	provider.TextFn = func(ctx context.Context, req grail.TextRequest) (grail.TextResult, error) {
-//		return grail.TextResult{Text: "mock response"}, nil
-//	}
-//	provider.ImageFn = func(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error) {
-//		return grail.ImageResult{
-//			Images: []grail.ImageOutput{
-//				{Data: []byte("fake image"), MIME: "image/png"},
+//	provider.GenerateFn = func(ctx context.Context, req grail.Request) (grail.Response, error) {
+//		return grail.Response{
+//			Outputs: []grail.OutputPart{
+//				grail.NewTextOutputPart("mock response"),
 //			},
 //		}, nil
 //	}
 //	client := grail.NewClient(provider)
-//	res, _ := client.GenerateText(ctx, grail.TextRequest{
-//		Input: []grail.Part{grail.Text("test")},
+//	res, _ := client.Generate(ctx, grail.Request{
+//		Inputs: []grail.Input{grail.InputText("test")},
+//		Output: grail.OutputText(),
 //	})
 package mock
 
 import (
 	"context"
-	"errors"
 
 	"github.com/montanaflynn/grail"
 )
 
 // Provider is a test double for grail.Provider. Configure the function fields to control behavior.
 type Provider struct {
-	TextFn  func(ctx context.Context, req grail.TextRequest) (grail.TextResult, error)
-	ImageFn func(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error)
-	// Optional configured models; used to satisfy grail.Provider metadata.
-	TextModelVal  string
-	ImageModelVal string
-	// Optional defaults for pointer-based options.
-	MaxTokens   *int32
-	Temperature *float32
-	TopP        *float32
+	GenerateFn func(ctx context.Context, req grail.Request) (grail.Response, error)
+	NameVal    string
 }
 
-func (m *Provider) GenerateText(ctx context.Context, req grail.TextRequest) (grail.TextResult, error) {
-	if m.TextFn == nil {
-		return grail.TextResult{}, errors.New("mock TextFn not set")
+// Name returns the provider name.
+func (m *Provider) Name() string {
+	if m.NameVal != "" {
+		return m.NameVal
 	}
-	return m.TextFn(ctx, req)
+	return "mock"
 }
 
-func (m *Provider) GenerateImage(ctx context.Context, req grail.ImageRequest) (grail.ImageResult, error) {
-	if m.ImageFn == nil {
-		return grail.ImageResult{}, errors.New("mock ImageFn not set")
+// DoGenerate implements the ProviderExecutor interface.
+func (m *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
+	if m.GenerateFn == nil {
+		return grail.Response{}, grail.NewGrailError(grail.Internal, "mock GenerateFn not set").WithProviderName("mock")
 	}
-	return m.ImageFn(ctx, req)
-}
-
-func (m *Provider) DefaultTextModel() string {
-	if m.TextModelVal != "" {
-		return m.TextModelVal
-	}
-	return "mock-text-model"
-}
-
-func (m *Provider) DefaultImageModel() string {
-	if m.ImageModelVal != "" {
-		return m.ImageModelVal
-	}
-	return "mock-image-model"
+	return m.GenerateFn(ctx, req)
 }
