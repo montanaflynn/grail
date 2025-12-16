@@ -126,6 +126,21 @@ jobs:
           
           echo "✅ Created and pushed tag: $NEW_TAG"
 
+      - name: Trigger Go proxy update
+        run: |
+          NEW_TAG="${{ steps.calc_version.outputs.new_tag }}"
+          PROXY_URL="https://proxy.golang.org/github.com/montanaflynn/grail/@v/${NEW_TAG}.info"
+          echo "Triggering Go proxy update: $PROXY_URL"
+          # Try curl first, fallback to wget if curl is not available
+          if command -v curl > /dev/null 2>&1; then
+            curl -s "$PROXY_URL" > /dev/null || echo "Warning: Failed to trigger Go proxy update"
+          elif command -v wget > /dev/null 2>&1; then
+            wget -q -O /dev/null "$PROXY_URL" || echo "Warning: Failed to trigger Go proxy update"
+          else
+            echo "Warning: Neither curl nor wget available, skipping Go proxy update"
+          fi
+          echo "✅ Triggered Go proxy and documentation update"
+
       - name: Summary
         run: |
           echo "## Release Tag Created 🎉" >> $GITHUB_STEP_SUMMARY
