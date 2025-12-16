@@ -2,6 +2,14 @@
 ## [Unreleased]
 
 
+<a name="v0.2.2"></a>
+## [v0.2.2] - 2025-12-16
+
+### Chores
+
+- **deps:** bump golang.org/x/crypto ([#5](https://github.com/montanaflynn/grail/issues/5))
+
+
 <a name="v0.2.1"></a>
 ## [v0.2.1] - 2025-12-16
 
@@ -90,7 +98,8 @@
 - initial release with unified AI provider interface
 
 
-[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.2.2...HEAD
+[v0.2.2]: https://github.com/montanaflynn/grail/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/montanaflynn/grail/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/montanaflynn/grail/compare/v0.1.5...v0.2.0
 [v0.1.5]: https://github.com/montanaflynn/grail/compare/v0.1.4...v0.1.5
