@@ -479,7 +479,11 @@ func (c *Provider) toGenAIParts(inputs []grail.Input) ([]*genai.Part, error) {
 				return nil, fmt.Errorf("input %d: file data is empty", i)
 			}
 			if mime == "" {
-				mime = "application/octet-stream"
+				// Try to detect MIME from data (e.g., from InputImage with empty MIME)
+				mime = grail.SniffImageMIME(data)
+				if mime == "" {
+					mime = "application/octet-stream"
+				}
 			}
 			out = append(out, genai.NewPartFromBytes(data, mime))
 			continue

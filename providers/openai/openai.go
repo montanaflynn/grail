@@ -649,11 +649,13 @@ func (p *Provider) toResponseInput(inputs []grail.Input) (responses.ResponseInpu
 				return responses.ResponseInputItemUnionParam{}, fmt.Errorf("input %d: file data is empty", i)
 			}
 
+			// Detect MIME if empty (e.g., from InputImage)
+			if mime == "" {
+				mime = grail.SniffImageMIME(data)
+			}
+
 			// Handle images
 			if strings.HasPrefix(mime, "image/") {
-				if mime == "" {
-					mime = "image/png"
-				}
 				b64 := base64.StdEncoding.EncodeToString(data)
 				dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
 				content = append(content, responses.ResponseInputContentUnionParam{
@@ -688,6 +690,9 @@ func (p *Provider) toResponseInput(inputs []grail.Input) (responses.ResponseInpu
 			}
 
 			// Other file types - treat as generic file
+			if mime == "" {
+				mime = "application/octet-stream"
+			}
 			b64 := base64.StdEncoding.EncodeToString(data)
 			dataURL := fmt.Sprintf("data:%s;base64,%s", mime, b64)
 			filename := name

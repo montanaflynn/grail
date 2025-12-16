@@ -867,7 +867,9 @@ func getOutputType(output Output) string {
 	}
 }
 
-func sniffImageMIME(data []byte) string {
+// SniffImageMIME detects image MIME type from magic bytes.
+// It supports PNG, JPEG, GIF, and WebP formats.
+func SniffImageMIME(data []byte) string {
 	if len(data) < 4 {
 		return ""
 	}
@@ -879,7 +881,7 @@ func sniffImageMIME(data []byte) string {
 	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
 		return "image/jpeg"
 	}
-	if len(data) >= 6 && string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a" {
+	if len(data) >= 6 && (string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a") {
 		return "image/gif"
 	}
 	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
@@ -887,6 +889,10 @@ func sniffImageMIME(data []byte) string {
 	}
 
 	return ""
+}
+
+func sniffImageMIME(data []byte) string {
+	return SniffImageMIME(data)
 }
 
 func detectMIMEFromPath(path string) string {
