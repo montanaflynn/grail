@@ -18,11 +18,10 @@
 //
 // Default models:
 //   - Text: gpt-5.2
-//   - Image: gpt-image-1.5
+//   - Image: gpt-image-1
 //
 // Available image models:
-//   - gpt-image-1.5 (default)
-//   - gpt-image-1
+//   - gpt-image-1 (default)
 //   - gpt-image-1-mini
 package openai
 
@@ -50,7 +49,7 @@ const (
 	// DefaultTextModelName is the OpenAI text model used when no override is provided.
 	DefaultTextModelName = shared.ChatModelGPT5_2
 	// DefaultImageModelName is the OpenAI image model used when no override is provided.
-	DefaultImageModelName = openai.ImageModelGPTImage1_5
+	DefaultImageModelName = openai.ImageModelGPTImage1
 )
 
 var (
@@ -93,8 +92,8 @@ func WithTextModel(model string) Option {
 	return func(s *settings) { s.textModel = model }
 }
 
-// WithImageModel overrides the default image model (default: gpt-image-1.5).
-// Available models: gpt-image-1.5, gpt-image-1, gpt-image-1-mini
+// WithImageModel overrides the default image model (default: gpt-image-1).
+// Available models: gpt-image-1, gpt-image-1-mini
 func WithImageModel(model string) Option {
 	return func(s *settings) { s.imageModel = model }
 }
