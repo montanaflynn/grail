@@ -1,3 +1,12 @@
+// Pdf-understanding demonstrates text generation from PDF documents.
+// It fetches a PDF from a URL (or uses a default sample) and generates text summaries
+// or analysis. Supports OpenAI and Gemini providers.
+//
+// Usage:
+//
+//	go run examples/pdf-understanding/main.go
+//	go run examples/pdf-understanding/main.go -openai
+//	go run examples/pdf-understanding/main.go -url https://example.com/document.pdf
 package main
 
 import (

@@ -1,3 +1,12 @@
+// Image-understanding demonstrates text generation from image inputs.
+// It fetches an image from a URL and uses it along with text prompts to generate
+// descriptive text. Supports OpenAI and Gemini providers.
+//
+// Usage:
+//
+//	go run examples/image-understanding/main.go
+//	go run examples/image-understanding/main.go -openai
+//	go run examples/image-understanding/main.go -gemini -debug
 package main
 
 import (

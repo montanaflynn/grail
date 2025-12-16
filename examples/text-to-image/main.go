@@ -1,3 +1,12 @@
+// Text-to-image demonstrates image generation from text prompts.
+// It can run with OpenAI, Gemini, or both providers in parallel, generating images
+// from text descriptions and saving them to the examples-output directory.
+//
+// Usage:
+//
+//	go run examples/text-to-image/main.go
+//	go run examples/text-to-image/main.go -openai
+//	go run examples/text-to-image/main.go -gemini -debug
 package main
 
 import (

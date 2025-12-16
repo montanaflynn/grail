@@ -1,3 +1,12 @@
+// Gemini-image-options demonstrates Gemini-specific image generation options.
+// It shows how to configure aspect ratio (1:1, 16:9, etc.) and image size (1K, 2K, 4K)
+// for image generation requests.
+//
+// Usage:
+//
+//	go run examples/gemini-image-options/main.go
+//	go run examples/gemini-image-options/main.go -aspect-ratio 16:9 -size 4K
+//	go run examples/gemini-image-options/main.go -aspect-ratio 1:1 -size 2K -debug
 package main
 
 import (

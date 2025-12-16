@@ -1,38 +1,26 @@
-// Package grail: provider-agnostic multimodal generation (v1)
+// Package grail provides a unified interface for AI text and image generation
+// across multiple providers (OpenAI, Gemini, etc.). It supports multimodal
+// inputs (ordered sequences of text, images, and PDFs) and provides type-safe error
+// handling, structured logging, and flexible configuration options.
 //
-// RATIONALE (high-level):
+// Example usage:
 //
-// 1. Grail is intentionally "model-agnostic".
-//   - Grail does NOT choose models.
-//   - Grail does NOT encode model capabilities.
-//   - Providers own defaults, routing, and model selection.
+//	provider, _ := openai.New()
+//	client := grail.NewClient(provider)
+//	res, _ := client.Generate(ctx, grail.Request{
+//		Inputs: []grail.Input{grail.InputText("Hello, world!")},
+//		Output: grail.OutputText(),
+//	})
 //
-// 2. Capability checks are runtime and provider-specific.
-//   - Whether a request supports images / PDFs / JSON depends on the
-//     provider's selected model(s) and route.
-//   - Grail only validates structural correctness (inputs present,
-//     MIME provided, size limits).
-//   - Providers return typed `unsupported` errors when a combination
-//     is not supported.
+// Sub-packages:
 //
-// 3. Single-output per request (v1).
-//   - Output is explicit: OutputText, OutputImage, or OutputJSON.
-//   - Multimodal INPUT is allowed; multimodal OUTPUT is deferred.
+// This package provides the core client and interfaces. Provider implementations
+// are available in sub-packages:
 //
-// 4. InputFile is the universal attachment type.
-//   - Images, PDFs, code, markdown, HTML, DOCX, etc. are all InputFile
-//     distinguished by MIME.
-//   - No URI references; Grail only works with bytes it has loaded.
-//
-// 5. No streaming in v1.
-//   - Generate returns a complete Response or a typed error.
-//   - Streaming is additive and can be introduced later without
-//     breaking this API.
-//
-// 6. Naming is explicit and directional.
-//   - InputText vs OutputText avoids semantic collisions.
-//   - Direction-first naming (Input*, Output*) improves autocomplete and docs.
-//   - Inputs go in, Output is requested, OutputParts come back.
+//   - providers - All providers (https://pkg.go.dev/github.com/montanaflynn/grail/providers)
+//   - providers/openai - OpenAI provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/openai)
+//   - providers/gemini - Google Gemini provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/gemini)
+//   - providers/mock - Mock provider (https://pkg.go.dev/github.com/montanaflynn/grail/providers/mock)
 package grail
 
 import (

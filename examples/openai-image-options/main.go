@@ -1,3 +1,12 @@
+// Openai-image-options demonstrates OpenAI-specific image generation options.
+// It shows how to configure output format (PNG, JPEG, WebP), background (auto, transparent, opaque),
+// image size, moderation level, and compression settings.
+//
+// Usage:
+//
+//	go run examples/openai-image-options/main.go
+//	go run examples/openai-image-options/main.go -format jpeg -size 1024x1024
+//	go run examples/openai-image-options/main.go -background transparent -compression 80
 package main
 
 import (

@@ -1,3 +1,10 @@
+// Simple-text demonstrates minimal text generation with default settings.
+// It uses the OpenAI provider with defaults (API key from OPENAI_API_KEY environment variable,
+// default model, default logger) to generate text from a simple prompt.
+//
+// Usage:
+//
+//	go run examples/simple-text/main.go
 package main
 
 import (

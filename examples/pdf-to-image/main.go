@@ -1,3 +1,12 @@
+// Pdf-to-image demonstrates image generation from PDF documents.
+// It reads a PDF from a file path or URL and generates images (e.g., infographics)
+// based on the PDF content. Supports OpenAI and Gemini providers.
+//
+// Usage:
+//
+//	go run examples/pdf-to-image/main.go
+//	go run examples/pdf-to-image/main.go -path document.pdf
+//	go run examples/pdf-to-image/main.go -url https://example.com/document.pdf -openai
 package main
 
 import (

@@ -1,3 +1,12 @@
+// Text-generation demonstrates text generation with provider selection.
+// It can run with OpenAI, Gemini, or both providers in parallel to compare results.
+//
+// Usage:
+//
+//	go run examples/text-generation/main.go
+//	go run examples/text-generation/main.go -openai
+//	go run examples/text-generation/main.go -gemini
+//	go run examples/text-generation/main.go -openai -gemini -debug
 package main
 
 import (
