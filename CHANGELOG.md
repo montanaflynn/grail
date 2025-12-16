@@ -2,6 +2,27 @@
 ## [Unreleased]
 
 
+<a name="v0.2.1"></a>
+## [v0.2.1] - 2025-12-16
+
+### Bug Fixes
+
+- detect MIME type for InputImage with empty MIME
+- use type conversion instead of struct literal for ImageOutputInfo
+
+### Code Refactoring
+
+- **openai:** remove gpt-image-1.5 as it doesn't work yet
+
+### Documentation
+
+- add package and example documentation comments
+
+### Features
+
+- update OpenAI defaults to gpt-5.2 and gpt-image-1.5
+
+
 <a name="v0.2.0"></a>
 ## [v0.2.0] - 2025-12-14
 
@@ -69,7 +90,8 @@
 - initial release with unified AI provider interface
 
 
-[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.2.1...HEAD
+[v0.2.1]: https://github.com/montanaflynn/grail/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/montanaflynn/grail/compare/v0.1.5...v0.2.0
 [v0.1.5]: https://github.com/montanaflynn/grail/compare/v0.1.4...v0.1.5
 [v0.1.4]: https://github.com/montanaflynn/grail/compare/v0.1.3...v0.1.4
