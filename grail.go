@@ -452,11 +452,7 @@ func (r Response) ImageOutputs() []ImageOutputInfo {
 	var infos []ImageOutputInfo
 	for _, part := range r.Outputs {
 		if imgPart, ok := part.(imageOutputPart); ok {
-			infos = append(infos, ImageOutputInfo{
-				Data: imgPart.Data,
-				MIME: imgPart.MIME,
-				Name: imgPart.Name,
-			})
+			infos = append(infos, ImageOutputInfo(imgPart))
 		}
 	}
 	return infos
