@@ -17,8 +17,13 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gpt-5.1
-//   - Image: gpt-image-1
+//   - Text: gpt-5.2
+//   - Image: gpt-image-1.5
+//
+// Available image models:
+//   - gpt-image-1.5 (default)
+//   - gpt-image-1
+//   - gpt-image-1-mini
 package openai
 
 import (
@@ -43,9 +48,9 @@ import (
 
 const (
 	// DefaultTextModelName is the OpenAI text model used when no override is provided.
-	DefaultTextModelName = shared.ChatModelGPT5_1
+	DefaultTextModelName = shared.ChatModelGPT5_2
 	// DefaultImageModelName is the OpenAI image model used when no override is provided.
-	DefaultImageModelName = openai.ImageModelGPTImage1
+	DefaultImageModelName = openai.ImageModelGPTImage1_5
 )
 
 var (
@@ -83,12 +88,13 @@ func WithAPIKeyFromEnv(env string) Option {
 	}
 }
 
-// WithTextModel overrides the default text model (default: gpt-5.1).
+// WithTextModel overrides the default text model (default: gpt-5.2).
 func WithTextModel(model string) Option {
 	return func(s *settings) { s.textModel = model }
 }
 
-// WithImageModel overrides the default image model (default: gpt-image-1).
+// WithImageModel overrides the default image model (default: gpt-image-1.5).
+// Available models: gpt-image-1.5, gpt-image-1, gpt-image-1-mini
 func WithImageModel(model string) Option {
 	return func(s *settings) { s.imageModel = model }
 }
@@ -442,10 +448,6 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 		}
 	}
 
-	if p.log != nil {
-		p.log.Debug("openai generate image request", slog.String("model", model))
-	}
-
 	size := string(cfg.size)
 	if size == "" {
 		size = "auto"
@@ -487,6 +489,32 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 
 	if imageOpts.SystemPrompt != "" {
 		params.Instructions = param.NewOpt(imageOpts.SystemPrompt)
+	}
+
+	if p.log != nil {
+		// Log detailed request information
+		logFields := []any{
+			slog.String("language_model", model),
+			slog.String("image_model", p.imageModel),
+			slog.String("output_format", string(cfg.format)),
+			slog.String("background", string(cfg.background)),
+			slog.String("size", size),
+			slog.String("moderation", moderation),
+		}
+		if cfg.outputCompression != nil {
+			logFields = append(logFields, slog.Int64("compression", *cfg.outputCompression))
+		} else {
+			logFields = append(logFields, slog.Int("compression", 100))
+		}
+		if imageOpts.SystemPrompt != "" {
+			logFields = append(logFields, slog.String("system_prompt", imageOpts.SystemPrompt))
+		}
+		// Try to marshal the full params for complete visibility
+		if paramsJSON, err := json.MarshalIndent(params, "", "  "); err == nil {
+			p.log.Debug("openai generate image request (full params)", append(logFields, slog.String("params", string(paramsJSON)))...)
+		} else {
+			p.log.Debug("openai generate image request", logFields...)
+		}
 	}
 
 	resp, err := p.client.Responses.New(ctx, params)

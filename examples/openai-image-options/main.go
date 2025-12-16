@@ -1,12 +1,13 @@
 // Openai-image-options demonstrates OpenAI-specific image generation options.
-// It shows how to configure output format (PNG, JPEG, WebP), background (auto, transparent, opaque),
+// It shows how to configure image model (gpt-image-1.5, gpt-image-1, gpt-image-1-mini),
+// output format (PNG, JPEG, WebP), background (auto, transparent, opaque),
 // image size, moderation level, and compression settings.
 //
 // Usage:
 //
 //	go run examples/openai-image-options/main.go
-//	go run examples/openai-image-options/main.go -format jpeg -size 1024x1024
-//	go run examples/openai-image-options/main.go -background transparent -compression 80
+//	go run examples/openai-image-options/main.go -model gpt-image-1.5 -format jpeg -size 1024x1024
+//	go run examples/openai-image-options/main.go -model gpt-image-1-mini -background transparent -compression 80
 package main
 
 import (
@@ -28,6 +29,7 @@ import (
 func main() {
 	ctx := context.Background()
 
+	modelFlag := flag.String("model", "gpt-image-1.5", "openai image model: gpt-image-1.5|gpt-image-1|gpt-image-1-mini")
 	formatFlag := flag.String("format", "png", "openai output format: png|jpeg|jpg|webp")
 	backgroundFlag := flag.String("background", "auto", "openai background: auto|transparent|opaque")
 	sizeFlag := flag.String("size", "auto", "openai image size: auto|1024x1024|1536x1024|1024x1536|256x256|512x512|1792x1024|1024x1792")
@@ -46,6 +48,7 @@ func main() {
 
 	provider, err := openai.New(
 		openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
+		openai.WithImageModel(*modelFlag),
 	)
 	if err != nil {
 		log.Fatalf("new openai provider: %v", err)

@@ -128,8 +128,8 @@ provider, err := openai.New(
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gpt-5.1`)
-- `WithImageModel(model string)` - Override default image model (default: `gpt-image-1`)
+- `WithTextModel(model string)` - Override default text model (default: `gpt-5.2`)
+- `WithImageModel(model string)` - Override default image model (default: `gpt-image-1.5`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
 **Image Options:**
