@@ -193,6 +193,59 @@ type ModelUse struct {
 	Name string // provider-native model identifier
 }
 
+// ModelRole describes the primary function of a model.
+type ModelRole string
+
+const (
+	ModelRoleText  ModelRole = "text"  // Text/language generation
+	ModelRoleImage ModelRole = "image" // Image generation
+)
+
+// ModelTier describes the quality/speed trade-off of a model.
+type ModelTier string
+
+const (
+	ModelTierBest ModelTier = "best" // Highest quality, may be slower/costlier
+	ModelTierFast ModelTier = "fast" // Speed/cost optimized
+)
+
+// Model describes a model and its capabilities.
+// Providers export these as package-level variables for easy reference.
+type Model struct {
+	Name         string            // Model identifier (e.g., "gpt-5.2", "gemini-3-flash-preview")
+	Role         ModelRole         // text or image
+	Tier         ModelTier         // best or fast
+	Capabilities ModelCapabilities // What the model can do
+}
+
+// String returns the model name for use in requests.
+func (m Model) String() string { return m.Name }
+
+// ModelCapabilities describes what a model can do.
+type ModelCapabilities struct {
+	TextGeneration     bool // Can generate text from text input
+	ImageGeneration    bool // Can generate images from text input
+	ImageUnderstanding bool // Can understand/describe images
+	PDFUnderstanding   bool // Can understand/extract from PDFs
+	JSONOutput         bool // Can output structured JSON
+}
+
+// ModelCatalog is an optional interface for providers to manage model selection.
+// Providers implement this to allow users to override default models.
+type ModelCatalog interface {
+	SetBestTextModel(model Model)
+	SetFastTextModel(model Model)
+	SetBestImageModel(model Model)
+	SetFastImageModel(model Model)
+
+	BestTextModel() Model
+	FastTextModel() Model
+	BestImageModel() Model
+	FastImageModel() Model
+
+	AllModels() []Model
+}
+
 //
 // Inputs
 //
@@ -416,6 +469,8 @@ func (jsonOutputPart) isOutputPart() {}
 type Request struct {
 	Inputs          []Input
 	Output          Output
+	Model           string    // Optional: explicit model name (highest priority)
+	Tier            ModelTier // Optional: tier-based selection (if Model not set)
 	ProviderOptions []ProviderOption
 	Metadata        map[string]string
 }
@@ -530,6 +585,14 @@ type Client interface {
 	InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
 	InputImageFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
 	InputPDFFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
+
+	// ListModels returns all available models for the provider and their capabilities.
+	// Returns an error if the provider doesn't support model listing.
+	ListModels(ctx context.Context) ([]Model, error)
+
+	// GetModel returns the model matching the given role and tier.
+	// Returns an error if no matching model is found.
+	GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error)
 }
 
 type ClientOption interface{ applyClientOpt(*clientOpt) }
@@ -575,6 +638,17 @@ func (f clientOptFunc) applyClientOpt(co *clientOpt) {
 // LoggerAware is an optional interface for providers to accept a logger from the client.
 type LoggerAware interface {
 	SetLogger(*slog.Logger)
+}
+
+// ModelLister is an optional interface for providers to list available models.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]Model, error)
+}
+
+// ModelResolver resolves a role+tier to a model name.
+// Providers implement this to support tier-based selection.
+type ModelResolver interface {
+	ResolveModel(role ModelRole, tier ModelTier) (string, error)
 }
 
 // WithLogger sets a custom logger for client-level logs.
@@ -670,14 +744,134 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 		return Response{}, NewGrailError(Internal, "provider executor not available")
 	}
 
+	// Resolve model selection: Model > Tier > Provider default
+	if req.Model == "" && req.Tier != "" {
+		role := roleFromOutput(req.Output)
+		if resolver, ok := c.provider.(ModelResolver); ok {
+			resolved, err := resolver.ResolveModel(role, req.Tier)
+			if err != nil {
+				return Response{}, NewGrailError(InvalidArgument, fmt.Sprintf("failed to resolve model for role=%s tier=%s: %v", role, req.Tier, err)).WithCause(err)
+			}
+			req.Model = resolved
+		}
+	}
+
+	// Validate model capabilities if model is specified and provider supports model listing
+	if req.Model != "" {
+		if err := c.validateModelCapabilities(req); err != nil {
+			return Response{}, err
+		}
+	}
+
 	if c.log != nil {
 		c.log.Info("generate request",
 			slog.Int("inputs", len(req.Inputs)),
 			slog.String("output_type", getOutputType(req.Output)),
+			slog.String("model", req.Model),
 		)
 	}
 
 	return c.provider.DoGenerate(ctx, req)
+}
+
+// validateModelCapabilities checks if the requested model supports the required capabilities.
+func (c *client) validateModelCapabilities(req Request) error {
+	lister, ok := c.provider.(ModelLister)
+	if !ok {
+		// Provider doesn't support model listing, skip validation
+		return nil
+	}
+
+	models, err := lister.ListModels(context.Background())
+	if err != nil {
+		// Can't list models, skip validation
+		return nil
+	}
+
+	// Find the model by name
+	var model *Model
+	for i := range models {
+		if models[i].Name == req.Model {
+			model = &models[i]
+			break
+		}
+	}
+
+	if model == nil {
+		// Model not in catalog, skip validation (might be a custom/new model)
+		return nil
+	}
+
+	// Check capabilities based on output type
+	if IsTextOutput(req.Output) {
+		if !model.Capabilities.TextGeneration {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support text generation; try a text model like one with TextGeneration capability", req.Model))
+		}
+	}
+
+	if _, isImage := GetImageSpec(req.Output); isImage {
+		if !model.Capabilities.ImageGeneration {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support image generation; try an image model like one with ImageGeneration capability", req.Model))
+		}
+	}
+
+	if _, _, isJSON := GetJSONOutput(req.Output); isJSON {
+		if !model.Capabilities.JSONOutput {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support JSON output; try a model with JSONOutput capability", req.Model))
+		}
+	}
+
+	// Validate input capabilities
+	for _, input := range req.Inputs {
+		if data, mime, _, isFile := AsFileInput(input); isFile {
+			// Check for image input
+			if mime == "" {
+				mime = SniffImageMIME(data)
+			}
+			if strings.HasPrefix(mime, "image/") && !model.Capabilities.ImageUnderstanding {
+				return NewGrailError(InvalidArgument,
+					fmt.Sprintf("model %q does not support image understanding; try a model with ImageUnderstanding capability", req.Model))
+			}
+			// Check for PDF input
+			if mime == "application/pdf" && !model.Capabilities.PDFUnderstanding {
+				return NewGrailError(InvalidArgument,
+					fmt.Sprintf("model %q does not support PDF understanding; try a model with PDFUnderstanding capability", req.Model))
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *client) ListModels(ctx context.Context) ([]Model, error) {
+	if c.provider == nil {
+		return nil, NewGrailError(Internal, "provider executor not available")
+	}
+
+	lister, ok := c.provider.(ModelLister)
+	if !ok {
+		return nil, NewGrailError(Unsupported, fmt.Sprintf("provider %s does not support model listing", c.provider.Name()))
+	}
+
+	return lister.ListModels(ctx)
+}
+
+func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error) {
+	models, err := c.ListModels(ctx)
+	if err != nil {
+		return Model{}, err
+	}
+
+	for _, m := range models {
+		if m.Role == role && m.Tier == tier {
+			return m, nil
+		}
+	}
+
+	return Model{}, NewGrailError(Unsupported, fmt.Sprintf("no model found for role=%s tier=%s", role, tier))
 }
 
 func (c *client) InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
@@ -865,6 +1059,18 @@ func getOutputType(output Output) string {
 	default:
 		return "unknown"
 	}
+}
+
+// roleFromOutput determines the ModelRole from the Output type.
+func roleFromOutput(output Output) ModelRole {
+	if IsTextOutput(output) {
+		return ModelRoleText
+	}
+	if _, isImage := GetImageSpec(output); isImage {
+		return ModelRoleImage
+	}
+	// JSON output also uses text models
+	return ModelRoleText
 }
 
 // SniffImageMIME detects image MIME type from magic bytes.

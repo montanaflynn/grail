@@ -17,7 +17,7 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gemini-2.5-flash
+//   - Text: gemini-3-flash-preview
 //   - Image: gemini-2.5-flash-image
 package gemini
 
@@ -37,9 +37,9 @@ import (
 
 const (
 	// DefaultTextModelName is the Gemini text model used when no override is provided.
-	DefaultTextModelName = "gemini-2.5-flash"
+	DefaultTextModelName = "gemini-3-pro-preview"
 	// DefaultImageModelName is the Gemini image model used when no override is provided.
-	DefaultImageModelName = "gemini-2.5-flash-image"
+	DefaultImageModelName = "gemini-3-pro-image-preview"
 )
 
 var (
@@ -101,6 +101,12 @@ type Provider struct {
 	textModel  string
 	imageModel string
 	log        *slog.Logger
+
+	// Model catalog slots
+	bestTextModel  grail.Model
+	fastTextModel  grail.Model
+	bestImageModel grail.Model
+	fastImageModel grail.Model
 }
 
 // ImageAspectRatio enumerates supported Gemini image aspect ratios.
@@ -248,6 +254,11 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		textModel:  cfg.textModel,
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
+		// Initialize model catalog with defaults
+		bestTextModel:  Gemini3Pro,
+		fastTextModel:  Gemini3Flash,
+		bestImageModel: Gemini3ProImage,
+		fastImageModel: Gemini25FlashImage,
 	}, nil
 }
 
@@ -261,6 +272,66 @@ func (c *Provider) SetLogger(l *slog.Logger) {
 // Name returns the provider name.
 func (c *Provider) Name() string {
 	return "gemini"
+}
+
+// ModelCatalog implementation
+
+// SetBestTextModel sets the model to use for best-quality text generation.
+func (c *Provider) SetBestTextModel(model grail.Model) { c.bestTextModel = model }
+
+// SetFastTextModel sets the model to use for fast text generation.
+func (c *Provider) SetFastTextModel(model grail.Model) { c.fastTextModel = model }
+
+// SetBestImageModel sets the model to use for best-quality image generation.
+func (c *Provider) SetBestImageModel(model grail.Model) { c.bestImageModel = model }
+
+// SetFastImageModel sets the model to use for fast image generation.
+func (c *Provider) SetFastImageModel(model grail.Model) { c.fastImageModel = model }
+
+// BestTextModel returns the model used for best-quality text generation.
+func (c *Provider) BestTextModel() grail.Model { return c.bestTextModel }
+
+// FastTextModel returns the model used for fast text generation.
+func (c *Provider) FastTextModel() grail.Model { return c.fastTextModel }
+
+// BestImageModel returns the model used for best-quality image generation.
+func (c *Provider) BestImageModel() grail.Model { return c.bestImageModel }
+
+// FastImageModel returns the model used for fast image generation.
+func (c *Provider) FastImageModel() grail.Model { return c.fastImageModel }
+
+// AllModels returns all configured models.
+func (c *Provider) AllModels() []grail.Model {
+	return []grail.Model{
+		c.bestTextModel,
+		c.fastTextModel,
+		c.bestImageModel,
+		c.fastImageModel,
+		// Additional models not set as best/fast
+		Gemini25Flash,
+		Gemini25FlashLite,
+	}
+}
+
+// ListModels returns all available Gemini models and their capabilities.
+func (c *Provider) ListModels(ctx context.Context) ([]grail.Model, error) {
+	return c.AllModels(), nil
+}
+
+// ResolveModel resolves a role+tier to a model name.
+func (c *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
+	switch {
+	case role == grail.ModelRoleText && tier == grail.ModelTierBest:
+		return c.bestTextModel.Name, nil
+	case role == grail.ModelRoleText && tier == grail.ModelTierFast:
+		return c.fastTextModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierBest:
+		return c.bestImageModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierFast:
+		return c.fastImageModel.Name, nil
+	default:
+		return "", fmt.Errorf("gemini: no %s model with tier %s", role, tier)
+	}
 }
 
 // DoGenerate implements the ProviderExecutor interface.
@@ -288,11 +359,17 @@ func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []
 	// Extract text options from provider options
 	var textOpts TextOptions
 	modelName := c.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				modelName = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					modelName = to.Model
+				}
 			}
 		}
 	}
@@ -343,15 +420,21 @@ func (c *Provider) generateImage(ctx context.Context, req grail.Request, parts [
 	modelName := c.imageModel
 	cfg := imageConfig{}
 
-	for _, opt := range req.ProviderOptions {
-		if io, ok := opt.(ImageOptions); ok {
-			imageOpts = io
-			if io.Model != "" {
-				modelName = io.Model
+	// Request.Model takes precedence for the image model
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if io, ok := opt.(ImageOptions); ok {
+				imageOpts = io
+				if io.Model != "" {
+					modelName = io.Model
+				}
 			}
-		}
-		if imgOpt, ok := opt.(ImageOption); ok {
-			imgOpt.apply(&cfg)
+			if imgOpt, ok := opt.(ImageOption); ok {
+				imgOpt.apply(&cfg)
+			}
 		}
 	}
 
@@ -403,11 +486,17 @@ func (c *Provider) generateJSON(ctx context.Context, req grail.Request, parts []
 	// Extract text options from provider options
 	var textOpts TextOptions
 	modelName := c.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				modelName = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					modelName = to.Model
+				}
 			}
 		}
 	}

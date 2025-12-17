@@ -91,6 +91,30 @@ pdfRes, _ := client.Generate(ctx, grail.Request{
 })
 text, _ := pdfRes.Text()
 fmt.Println(text)
+
+// Model selection: explicit model name
+res, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{grail.InputText("Hello")},
+	Output: grail.OutputText(),
+	Model:  "gpt-4o",  // Use this specific model
+})
+
+// Model selection: tier-based (provider picks the right model)
+res, _ := client.Generate(ctx, grail.Request{
+	Inputs: []grail.Input{grail.InputText("Hello")},
+	Output: grail.OutputText(),
+	Tier:   grail.ModelTierFast,  // Let provider pick the fast text model
+})
+
+// Query available models
+models, _ := client.ListModels(ctx)
+for _, m := range models {
+	fmt.Printf("%s: role=%s tier=%s\n", m.Name, m.Role, m.Tier)
+}
+
+// Get specific model by role and tier
+model, _ := client.GetModel(ctx, grail.ModelRoleText, grail.ModelTierBest)
+fmt.Printf("Best text model: %s\n", model.Name)
 ```
 
 ## Examples
@@ -153,7 +177,7 @@ provider, err := gemini.New(ctx)
 // With options
 provider, err := gemini.New(ctx,
     gemini.WithAPIKey("..."),
-    gemini.WithTextModel("gemini-2.5-flash"),
+    gemini.WithTextModel("gemini-3-flash-preview"),
     gemini.WithImageModel("gemini-2.5-flash-image"),
     gemini.WithLogger(logger),
 )
@@ -162,7 +186,7 @@ provider, err := gemini.New(ctx,
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gemini-2.5-flash`)
+- `WithTextModel(model string)` - Override default text model (default: `gemini-3-flash-preview`)
 - `WithImageModel(model string)` - Override default image model (default: `gemini-2.5-flash-image`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 

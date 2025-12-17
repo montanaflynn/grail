@@ -114,6 +114,12 @@ type Provider struct {
 	imageModel string
 	log        *slog.Logger
 	imgFormat  string
+
+	// Model catalog slots
+	bestTextModel  grail.Model
+	fastTextModel  grail.Model
+	bestImageModel grail.Model
+	fastImageModel grail.Model
 }
 
 // ImageFormat enumerates supported OpenAI image output formats.
@@ -321,6 +327,11 @@ func New(opts ...Option) (*Provider, error) {
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
 		imgFormat:  cfg.imgFormat,
+		// Initialize model catalog with defaults
+		bestTextModel:  GPT5_2,
+		fastTextModel:  GPT4o,
+		bestImageModel: GPTImage1,
+		fastImageModel: GPTImage1Mini,
 	}, nil
 }
 
@@ -334,6 +345,63 @@ func (p *Provider) SetLogger(l *slog.Logger) {
 // Name returns the provider name.
 func (p *Provider) Name() string {
 	return "openai"
+}
+
+// ModelCatalog implementation
+
+// SetBestTextModel sets the model to use for best-quality text generation.
+func (p *Provider) SetBestTextModel(model grail.Model) { p.bestTextModel = model }
+
+// SetFastTextModel sets the model to use for fast text generation.
+func (p *Provider) SetFastTextModel(model grail.Model) { p.fastTextModel = model }
+
+// SetBestImageModel sets the model to use for best-quality image generation.
+func (p *Provider) SetBestImageModel(model grail.Model) { p.bestImageModel = model }
+
+// SetFastImageModel sets the model to use for fast image generation.
+func (p *Provider) SetFastImageModel(model grail.Model) { p.fastImageModel = model }
+
+// BestTextModel returns the model used for best-quality text generation.
+func (p *Provider) BestTextModel() grail.Model { return p.bestTextModel }
+
+// FastTextModel returns the model used for fast text generation.
+func (p *Provider) FastTextModel() grail.Model { return p.fastTextModel }
+
+// BestImageModel returns the model used for best-quality image generation.
+func (p *Provider) BestImageModel() grail.Model { return p.bestImageModel }
+
+// FastImageModel returns the model used for fast image generation.
+func (p *Provider) FastImageModel() grail.Model { return p.fastImageModel }
+
+// AllModels returns all configured models.
+func (p *Provider) AllModels() []grail.Model {
+	return []grail.Model{
+		p.bestTextModel,
+		p.fastTextModel,
+		p.bestImageModel,
+		p.fastImageModel,
+	}
+}
+
+// ListModels returns all available OpenAI models and their capabilities.
+func (p *Provider) ListModels(ctx context.Context) ([]grail.Model, error) {
+	return p.AllModels(), nil
+}
+
+// ResolveModel resolves a role+tier to a model name.
+func (p *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
+	switch {
+	case role == grail.ModelRoleText && tier == grail.ModelTierBest:
+		return p.bestTextModel.Name, nil
+	case role == grail.ModelRoleText && tier == grail.ModelTierFast:
+		return p.fastTextModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierBest:
+		return p.bestImageModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierFast:
+		return p.fastImageModel.Name, nil
+	default:
+		return "", fmt.Errorf("openai: no %s model with tier %s", role, tier)
+	}
 }
 
 // DoGenerate implements the ProviderExecutor interface.
@@ -361,11 +429,17 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, item res
 	// Extract text options from provider options
 	var textOpts TextOptions
 	model := p.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				model = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		model = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					model = to.Model
+				}
 			}
 		}
 	}
@@ -435,16 +509,26 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 		moderation: ImageModerationAuto,
 	}
 
+	// Request.Model takes precedence for the language model
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	for _, opt := range req.ProviderOptions {
 		if io, ok := opt.(ImageOptions); ok {
 			imageOpts = io
-			if io.Model != "" {
-				model = io.Model
-			}
+			// ImageOptions.Model is for the image generation model, not language model
+			// We handle that separately below
 		}
 		if imgOpt, ok := opt.(ImageOption); ok {
 			imgOpt.apply(&cfg)
 		}
+	}
+
+	// Handle image model selection (separate from language model)
+	imageModel := p.imageModel
+	if imageOpts.Model != "" {
+		imageModel = imageOpts.Model
 	}
 
 	size := string(cfg.size)
@@ -458,7 +542,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 
 	imageGenParam := &responses.ToolImageGenerationParam{
 		Type:          "image_generation",
-		Model:         p.imageModel,
+		Model:         imageModel,
 		OutputFormat:  string(cfg.format),
 		Background:    string(cfg.background),
 		Moderation:    moderation,
@@ -494,7 +578,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 		// Log detailed request information
 		logFields := []any{
 			slog.String("language_model", model),
-			slog.String("image_model", p.imageModel),
+			slog.String("image_model", imageModel),
 			slog.String("output_format", string(cfg.format)),
 			slog.String("background", string(cfg.background)),
 			slog.String("size", size),
@@ -542,7 +626,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 			Route: "responses",
 			Models: []grail.ModelUse{
 				{Role: "language", Name: model},
-				{Role: "image_generation", Name: p.imageModel},
+				{Role: "image_generation", Name: imageModel},
 			},
 		},
 		RequestID: resp.ID,
@@ -554,11 +638,17 @@ func (p *Provider) generateJSON(ctx context.Context, req grail.Request, item res
 	// JSON output is similar to text, but with response format
 	var textOpts TextOptions
 	model := p.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				model = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		model = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					model = to.Model
+				}
 			}
 		}
 	}
