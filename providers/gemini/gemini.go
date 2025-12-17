@@ -101,6 +101,12 @@ type Provider struct {
 	textModel  string
 	imageModel string
 	log        *slog.Logger
+
+	// Model catalog slots
+	bestTextModel  grail.Model
+	fastTextModel  grail.Model
+	bestImageModel grail.Model
+	fastImageModel grail.Model
 }
 
 // ImageAspectRatio enumerates supported Gemini image aspect ratios.
@@ -248,6 +254,11 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		textModel:  cfg.textModel,
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
+		// Initialize model catalog with defaults
+		bestTextModel:  Gemini3Flash,
+		fastTextModel:  Gemini25Flash,
+		bestImageModel: Gemini25FlashImage,
+		fastImageModel: grail.Model{}, // No fast image model available
 	}, nil
 }
 
@@ -263,64 +274,68 @@ func (c *Provider) Name() string {
 	return "gemini"
 }
 
+// ModelCatalog implementation
+
+// SetBestTextModel sets the model to use for best-quality text generation.
+func (c *Provider) SetBestTextModel(model grail.Model) { c.bestTextModel = model }
+
+// SetFastTextModel sets the model to use for fast text generation.
+func (c *Provider) SetFastTextModel(model grail.Model) { c.fastTextModel = model }
+
+// SetBestImageModel sets the model to use for best-quality image generation.
+func (c *Provider) SetBestImageModel(model grail.Model) { c.bestImageModel = model }
+
+// SetFastImageModel sets the model to use for fast image generation.
+func (c *Provider) SetFastImageModel(model grail.Model) { c.fastImageModel = model }
+
+// BestTextModel returns the model used for best-quality text generation.
+func (c *Provider) BestTextModel() grail.Model { return c.bestTextModel }
+
+// FastTextModel returns the model used for fast text generation.
+func (c *Provider) FastTextModel() grail.Model { return c.fastTextModel }
+
+// BestImageModel returns the model used for best-quality image generation.
+func (c *Provider) BestImageModel() grail.Model { return c.bestImageModel }
+
+// FastImageModel returns the model used for fast image generation.
+func (c *Provider) FastImageModel() grail.Model { return c.fastImageModel }
+
+// AllModels returns all configured models.
+func (c *Provider) AllModels() []grail.Model {
+	models := []grail.Model{
+		c.bestTextModel,
+		c.fastTextModel,
+		c.bestImageModel,
+	}
+	// Only include fast image model if it's configured
+	if c.fastImageModel.Name != "" {
+		models = append(models, c.fastImageModel)
+	}
+	return models
+}
+
 // ListModels returns all available Gemini models and their capabilities.
-func (c *Provider) ListModels(ctx context.Context) ([]grail.ModelInfo, error) {
-	return []grail.ModelInfo{
-		{
-			Name: "gemini-3-flash-preview",
-			Role: grail.ModelRoleText,
-			Tier: grail.ModelTierBest,
-			Capabilities: grail.ModelCapabilities{
-				Text:       true,
-				ImageInput: true,
-				PDFInput:   true,
-				JSON:       true,
-				Multimodal: true,
-			},
-			Description: "Latest Gemini 3 Flash model for text generation, supports multimodal inputs",
-			Tags:        []string{"best", "fast", "latest", "preview", "multimodal"},
-		},
-		{
-			Name: "gemini-2.5-flash",
-			Role: grail.ModelRoleText,
-			Tier: grail.ModelTierFast,
-			Capabilities: grail.ModelCapabilities{
-				Text:       true,
-				ImageInput: true,
-				PDFInput:   true,
-				JSON:       true,
-				Multimodal: true,
-			},
-			Description: "Gemini 2.5 Flash model for text generation, supports multimodal inputs",
-			Tags:        []string{"fast", "multimodal"},
-		},
-		{
-			Name: "gemini-2.5-flash-image",
-			Role: grail.ModelRoleImage,
-			Tier: grail.ModelTierBest,
-			Capabilities: grail.ModelCapabilities{
-				Image:      true,
-				ImageInput: true,
-				Multimodal: true,
-			},
-			Description: "Gemini 2.5 Flash model for image generation",
-			Tags:        []string{"fast", "image"},
-		},
-	}, nil
+func (c *Provider) ListModels(ctx context.Context) ([]grail.Model, error) {
+	return c.AllModels(), nil
 }
 
 // ResolveModel resolves a role+tier to a model name.
 func (c *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
-	models, err := c.ListModels(context.Background())
-	if err != nil {
-		return "", err
-	}
-	for _, m := range models {
-		if m.Role == role && m.Tier == tier {
-			return m.Name, nil
+	switch {
+	case role == grail.ModelRoleText && tier == grail.ModelTierBest:
+		return c.bestTextModel.Name, nil
+	case role == grail.ModelRoleText && tier == grail.ModelTierFast:
+		return c.fastTextModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierBest:
+		return c.bestImageModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierFast:
+		if c.fastImageModel.Name == "" {
+			return "", fmt.Errorf("gemini: no fast image model configured")
 		}
+		return c.fastImageModel.Name, nil
+	default:
+		return "", fmt.Errorf("gemini: no %s model with tier %s", role, tier)
 	}
-	return "", fmt.Errorf("gemini: no %s model with tier %s", role, tier)
 }
 
 // DoGenerate implements the ProviderExecutor interface.

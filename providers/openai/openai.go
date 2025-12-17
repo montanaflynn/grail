@@ -114,6 +114,12 @@ type Provider struct {
 	imageModel string
 	log        *slog.Logger
 	imgFormat  string
+
+	// Model catalog slots
+	bestTextModel  grail.Model
+	fastTextModel  grail.Model
+	bestImageModel grail.Model
+	fastImageModel grail.Model
 }
 
 // ImageFormat enumerates supported OpenAI image output formats.
@@ -321,6 +327,11 @@ func New(opts ...Option) (*Provider, error) {
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
 		imgFormat:  cfg.imgFormat,
+		// Initialize model catalog with defaults
+		bestTextModel:  GPT5_2,
+		fastTextModel:  GPT4o,
+		bestImageModel: GPTImage1,
+		fastImageModel: GPTImage1Mini,
 	}, nil
 }
 
@@ -336,76 +347,61 @@ func (p *Provider) Name() string {
 	return "openai"
 }
 
+// ModelCatalog implementation
+
+// SetBestTextModel sets the model to use for best-quality text generation.
+func (p *Provider) SetBestTextModel(model grail.Model) { p.bestTextModel = model }
+
+// SetFastTextModel sets the model to use for fast text generation.
+func (p *Provider) SetFastTextModel(model grail.Model) { p.fastTextModel = model }
+
+// SetBestImageModel sets the model to use for best-quality image generation.
+func (p *Provider) SetBestImageModel(model grail.Model) { p.bestImageModel = model }
+
+// SetFastImageModel sets the model to use for fast image generation.
+func (p *Provider) SetFastImageModel(model grail.Model) { p.fastImageModel = model }
+
+// BestTextModel returns the model used for best-quality text generation.
+func (p *Provider) BestTextModel() grail.Model { return p.bestTextModel }
+
+// FastTextModel returns the model used for fast text generation.
+func (p *Provider) FastTextModel() grail.Model { return p.fastTextModel }
+
+// BestImageModel returns the model used for best-quality image generation.
+func (p *Provider) BestImageModel() grail.Model { return p.bestImageModel }
+
+// FastImageModel returns the model used for fast image generation.
+func (p *Provider) FastImageModel() grail.Model { return p.fastImageModel }
+
+// AllModels returns all configured models.
+func (p *Provider) AllModels() []grail.Model {
+	return []grail.Model{
+		p.bestTextModel,
+		p.fastTextModel,
+		p.bestImageModel,
+		p.fastImageModel,
+	}
+}
+
 // ListModels returns all available OpenAI models and their capabilities.
-func (p *Provider) ListModels(ctx context.Context) ([]grail.ModelInfo, error) {
-	return []grail.ModelInfo{
-		{
-			Name: shared.ChatModelGPT5_2,
-			Role: grail.ModelRoleText,
-			Tier: grail.ModelTierBest,
-			Capabilities: grail.ModelCapabilities{
-				Text:       true,
-				ImageInput: true,
-				PDFInput:   true,
-				JSON:       true,
-				Multimodal: true,
-			},
-			Description: "Latest GPT-5 model for text generation, supports multimodal inputs",
-			Tags:        []string{"best", "latest", "multimodal"},
-		},
-		{
-			Name: shared.ChatModelGPT4o,
-			Role: grail.ModelRoleText,
-			Tier: grail.ModelTierFast,
-			Capabilities: grail.ModelCapabilities{
-				Text:       true,
-				ImageInput: true,
-				PDFInput:   true,
-				JSON:       true,
-				Multimodal: true,
-			},
-			Description: "GPT-4o model for text generation, supports multimodal inputs",
-			Tags:        []string{"good", "multimodal"},
-		},
-		{
-			Name: openai.ImageModelGPTImage1,
-			Role: grail.ModelRoleImage,
-			Tier: grail.ModelTierBest,
-			Capabilities: grail.ModelCapabilities{
-				Image:      true,
-				ImageInput: true,
-				Multimodal: true,
-			},
-			Description: "Default image generation model",
-			Tags:        []string{"best", "image"},
-		},
-		{
-			Name: openai.ImageModelGPTImage1Mini,
-			Role: grail.ModelRoleImage,
-			Tier: grail.ModelTierFast,
-			Capabilities: grail.ModelCapabilities{
-				Image:      true,
-				ImageInput: true,
-				Multimodal: true,
-			},
-			Description: "Faster, lower-cost image generation model",
-			Tags:        []string{"fast", "image", "low-cost"},
-		},
-	}, nil
+func (p *Provider) ListModels(ctx context.Context) ([]grail.Model, error) {
+	return p.AllModels(), nil
 }
 
 // ResolveModel resolves a role+tier to a model name.
 func (p *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
-	models, err := p.ListModels(context.Background())
-	if err != nil {
-		return "", err
+	switch {
+	case role == grail.ModelRoleText && tier == grail.ModelTierBest:
+		return p.bestTextModel.Name, nil
+	case role == grail.ModelRoleText && tier == grail.ModelTierFast:
+		return p.fastTextModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierBest:
+		return p.bestImageModel.Name, nil
+	case role == grail.ModelRoleImage && tier == grail.ModelTierFast:
+		return p.fastImageModel.Name, nil
+	default:
+		return "", fmt.Errorf("openai: no %s model with tier %s", role, tier)
 	}
-	for _, m := range models {
-		if m.Role == role && m.Tier == tier {
-			return m.Name, nil
-		}
-	}
-	return "", fmt.Errorf("openai: no %s model with tier %s", role, tier)
 }
 
 // DoGenerate implements the ProviderExecutor interface.

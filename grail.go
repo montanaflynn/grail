@@ -209,24 +209,41 @@ const (
 	ModelTierFast ModelTier = "fast" // Speed/cost optimized
 )
 
-// ModelInfo describes a model and its capabilities.
-type ModelInfo struct {
+// Model describes a model and its capabilities.
+// Providers export these as package-level variables for easy reference.
+type Model struct {
 	Name         string            // Model identifier (e.g., "gpt-5.2", "gemini-3-flash-preview")
 	Role         ModelRole         // text or image
 	Tier         ModelTier         // best or fast
 	Capabilities ModelCapabilities // What the model can do
-	Description  string            // Optional description
-	Tags         []string          // Taxonomy tags (e.g., "best", "fast", "latest", "preview", "multimodal")
 }
+
+// String returns the model name for use in requests.
+func (m Model) String() string { return m.Name }
 
 // ModelCapabilities describes what a model can do.
 type ModelCapabilities struct {
-	Text       bool // Can generate text
-	Image      bool // Can generate images
-	ImageInput bool // Can accept image inputs
-	PDFInput   bool // Can accept PDF inputs
-	JSON       bool // Can generate structured JSON output
-	Multimodal bool // Can handle multiple input types in one request
+	TextGeneration     bool // Can generate text from text input
+	ImageGeneration    bool // Can generate images from text input
+	ImageUnderstanding bool // Can understand/describe images
+	PDFUnderstanding   bool // Can understand/extract from PDFs
+	JSONOutput         bool // Can output structured JSON
+}
+
+// ModelCatalog is an optional interface for providers to manage model selection.
+// Providers implement this to allow users to override default models.
+type ModelCatalog interface {
+	SetBestTextModel(model Model)
+	SetFastTextModel(model Model)
+	SetBestImageModel(model Model)
+	SetFastImageModel(model Model)
+
+	BestTextModel() Model
+	FastTextModel() Model
+	BestImageModel() Model
+	FastImageModel() Model
+
+	AllModels() []Model
 }
 
 //
@@ -571,11 +588,11 @@ type Client interface {
 
 	// ListModels returns all available models for the provider and their capabilities.
 	// Returns an error if the provider doesn't support model listing.
-	ListModels(ctx context.Context) ([]ModelInfo, error)
+	ListModels(ctx context.Context) ([]Model, error)
 
 	// GetModel returns the model matching the given role and tier.
 	// Returns an error if no matching model is found.
-	GetModel(ctx context.Context, role ModelRole, tier ModelTier) (ModelInfo, error)
+	GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error)
 }
 
 type ClientOption interface{ applyClientOpt(*clientOpt) }
@@ -625,7 +642,7 @@ type LoggerAware interface {
 
 // ModelLister is an optional interface for providers to list available models.
 type ModelLister interface {
-	ListModels(ctx context.Context) ([]ModelInfo, error)
+	ListModels(ctx context.Context) ([]Model, error)
 }
 
 // ModelResolver resolves a role+tier to a model name.
@@ -739,6 +756,13 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 		}
 	}
 
+	// Validate model capabilities if model is specified and provider supports model listing
+	if req.Model != "" {
+		if err := c.validateModelCapabilities(req); err != nil {
+			return Response{}, err
+		}
+	}
+
 	if c.log != nil {
 		c.log.Info("generate request",
 			slog.Int("inputs", len(req.Inputs)),
@@ -750,7 +774,79 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 	return c.provider.DoGenerate(ctx, req)
 }
 
-func (c *client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+// validateModelCapabilities checks if the requested model supports the required capabilities.
+func (c *client) validateModelCapabilities(req Request) error {
+	lister, ok := c.provider.(ModelLister)
+	if !ok {
+		// Provider doesn't support model listing, skip validation
+		return nil
+	}
+
+	models, err := lister.ListModels(context.Background())
+	if err != nil {
+		// Can't list models, skip validation
+		return nil
+	}
+
+	// Find the model by name
+	var model *Model
+	for i := range models {
+		if models[i].Name == req.Model {
+			model = &models[i]
+			break
+		}
+	}
+
+	if model == nil {
+		// Model not in catalog, skip validation (might be a custom/new model)
+		return nil
+	}
+
+	// Check capabilities based on output type
+	if IsTextOutput(req.Output) {
+		if !model.Capabilities.TextGeneration {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support text generation; try a text model like one with TextGeneration capability", req.Model))
+		}
+	}
+
+	if _, isImage := GetImageSpec(req.Output); isImage {
+		if !model.Capabilities.ImageGeneration {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support image generation; try an image model like one with ImageGeneration capability", req.Model))
+		}
+	}
+
+	if _, _, isJSON := GetJSONOutput(req.Output); isJSON {
+		if !model.Capabilities.JSONOutput {
+			return NewGrailError(InvalidArgument,
+				fmt.Sprintf("model %q does not support JSON output; try a model with JSONOutput capability", req.Model))
+		}
+	}
+
+	// Validate input capabilities
+	for _, input := range req.Inputs {
+		if data, mime, _, isFile := AsFileInput(input); isFile {
+			// Check for image input
+			if mime == "" {
+				mime = SniffImageMIME(data)
+			}
+			if strings.HasPrefix(mime, "image/") && !model.Capabilities.ImageUnderstanding {
+				return NewGrailError(InvalidArgument,
+					fmt.Sprintf("model %q does not support image understanding; try a model with ImageUnderstanding capability", req.Model))
+			}
+			// Check for PDF input
+			if mime == "application/pdf" && !model.Capabilities.PDFUnderstanding {
+				return NewGrailError(InvalidArgument,
+					fmt.Sprintf("model %q does not support PDF understanding; try a model with PDFUnderstanding capability", req.Model))
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *client) ListModels(ctx context.Context) ([]Model, error) {
 	if c.provider == nil {
 		return nil, NewGrailError(Internal, "provider executor not available")
 	}
@@ -763,10 +859,10 @@ func (c *client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return lister.ListModels(ctx)
 }
 
-func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (ModelInfo, error) {
+func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error) {
 	models, err := c.ListModels(ctx)
 	if err != nil {
-		return ModelInfo{}, err
+		return Model{}, err
 	}
 
 	for _, m := range models {
@@ -775,7 +871,7 @@ func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (
 		}
 	}
 
-	return ModelInfo{}, NewGrailError(Unsupported, fmt.Sprintf("no model found for role=%s tier=%s", role, tier))
+	return Model{}, NewGrailError(Unsupported, fmt.Sprintf("no model found for role=%s tier=%s", role, tier))
 }
 
 func (c *client) InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
