@@ -37,9 +37,9 @@ import (
 
 const (
 	// DefaultTextModelName is the Gemini text model used when no override is provided.
-	DefaultTextModelName = "gemini-3-flash-preview"
+	DefaultTextModelName = "gemini-3-pro-preview"
 	// DefaultImageModelName is the Gemini image model used when no override is provided.
-	DefaultImageModelName = "gemini-2.5-flash-image"
+	DefaultImageModelName = "gemini-3-pro-image-preview"
 )
 
 var (
@@ -255,10 +255,10 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
 		// Initialize model catalog with defaults
-		bestTextModel:  Gemini3Flash,
-		fastTextModel:  Gemini25Flash,
-		bestImageModel: Gemini25FlashImage,
-		fastImageModel: grail.Model{}, // No fast image model available
+		bestTextModel:  Gemini3Pro,
+		fastTextModel:  Gemini3Flash,
+		bestImageModel: Gemini3ProImage,
+		fastImageModel: Gemini25FlashImage,
 	}, nil
 }
 
@@ -302,16 +302,15 @@ func (c *Provider) FastImageModel() grail.Model { return c.fastImageModel }
 
 // AllModels returns all configured models.
 func (c *Provider) AllModels() []grail.Model {
-	models := []grail.Model{
+	return []grail.Model{
 		c.bestTextModel,
 		c.fastTextModel,
 		c.bestImageModel,
+		c.fastImageModel,
+		// Additional models not set as best/fast
+		Gemini25Flash,
+		Gemini25FlashLite,
 	}
-	// Only include fast image model if it's configured
-	if c.fastImageModel.Name != "" {
-		models = append(models, c.fastImageModel)
-	}
-	return models
 }
 
 // ListModels returns all available Gemini models and their capabilities.
@@ -329,9 +328,6 @@ func (c *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (str
 	case role == grail.ModelRoleImage && tier == grail.ModelTierBest:
 		return c.bestImageModel.Name, nil
 	case role == grail.ModelRoleImage && tier == grail.ModelTierFast:
-		if c.fastImageModel.Name == "" {
-			return "", fmt.Errorf("gemini: no fast image model configured")
-		}
 		return c.fastImageModel.Name, nil
 	default:
 		return "", fmt.Errorf("gemini: no %s model with tier %s", role, tier)
