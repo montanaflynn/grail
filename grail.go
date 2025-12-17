@@ -193,6 +193,42 @@ type ModelUse struct {
 	Name string // provider-native model identifier
 }
 
+// ModelRole describes the primary function of a model.
+type ModelRole string
+
+const (
+	ModelRoleText  ModelRole = "text"  // Text/language generation
+	ModelRoleImage ModelRole = "image" // Image generation
+)
+
+// ModelTier describes the quality/speed trade-off of a model.
+type ModelTier string
+
+const (
+	ModelTierBest ModelTier = "best" // Highest quality, may be slower/costlier
+	ModelTierFast ModelTier = "fast" // Speed/cost optimized
+)
+
+// ModelInfo describes a model and its capabilities.
+type ModelInfo struct {
+	Name         string            // Model identifier (e.g., "gpt-5.2", "gemini-3-flash-preview")
+	Role         ModelRole         // text or image
+	Tier         ModelTier         // best or fast
+	Capabilities ModelCapabilities // What the model can do
+	Description  string            // Optional description
+	Tags         []string          // Taxonomy tags (e.g., "best", "fast", "latest", "preview", "multimodal")
+}
+
+// ModelCapabilities describes what a model can do.
+type ModelCapabilities struct {
+	Text       bool // Can generate text
+	Image      bool // Can generate images
+	ImageInput bool // Can accept image inputs
+	PDFInput   bool // Can accept PDF inputs
+	JSON       bool // Can generate structured JSON output
+	Multimodal bool // Can handle multiple input types in one request
+}
+
 //
 // Inputs
 //
@@ -416,6 +452,8 @@ func (jsonOutputPart) isOutputPart() {}
 type Request struct {
 	Inputs          []Input
 	Output          Output
+	Model           string    // Optional: explicit model name (highest priority)
+	Tier            ModelTier // Optional: tier-based selection (if Model not set)
 	ProviderOptions []ProviderOption
 	Metadata        map[string]string
 }
@@ -530,6 +568,14 @@ type Client interface {
 	InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
 	InputImageFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
 	InputPDFFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
+
+	// ListModels returns all available models for the provider and their capabilities.
+	// Returns an error if the provider doesn't support model listing.
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+
+	// GetModel returns the model matching the given role and tier.
+	// Returns an error if no matching model is found.
+	GetModel(ctx context.Context, role ModelRole, tier ModelTier) (ModelInfo, error)
 }
 
 type ClientOption interface{ applyClientOpt(*clientOpt) }
@@ -575,6 +621,17 @@ func (f clientOptFunc) applyClientOpt(co *clientOpt) {
 // LoggerAware is an optional interface for providers to accept a logger from the client.
 type LoggerAware interface {
 	SetLogger(*slog.Logger)
+}
+
+// ModelLister is an optional interface for providers to list available models.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
+// ModelResolver resolves a role+tier to a model name.
+// Providers implement this to support tier-based selection.
+type ModelResolver interface {
+	ResolveModel(role ModelRole, tier ModelTier) (string, error)
 }
 
 // WithLogger sets a custom logger for client-level logs.
@@ -670,14 +727,55 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 		return Response{}, NewGrailError(Internal, "provider executor not available")
 	}
 
+	// Resolve model selection: Model > Tier > Provider default
+	if req.Model == "" && req.Tier != "" {
+		role := roleFromOutput(req.Output)
+		if resolver, ok := c.provider.(ModelResolver); ok {
+			resolved, err := resolver.ResolveModel(role, req.Tier)
+			if err != nil {
+				return Response{}, NewGrailError(InvalidArgument, fmt.Sprintf("failed to resolve model for role=%s tier=%s: %v", role, req.Tier, err)).WithCause(err)
+			}
+			req.Model = resolved
+		}
+	}
+
 	if c.log != nil {
 		c.log.Info("generate request",
 			slog.Int("inputs", len(req.Inputs)),
 			slog.String("output_type", getOutputType(req.Output)),
+			slog.String("model", req.Model),
 		)
 	}
 
 	return c.provider.DoGenerate(ctx, req)
+}
+
+func (c *client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	if c.provider == nil {
+		return nil, NewGrailError(Internal, "provider executor not available")
+	}
+
+	lister, ok := c.provider.(ModelLister)
+	if !ok {
+		return nil, NewGrailError(Unsupported, fmt.Sprintf("provider %s does not support model listing", c.provider.Name()))
+	}
+
+	return lister.ListModels(ctx)
+}
+
+func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (ModelInfo, error) {
+	models, err := c.ListModels(ctx)
+	if err != nil {
+		return ModelInfo{}, err
+	}
+
+	for _, m := range models {
+		if m.Role == role && m.Tier == tier {
+			return m, nil
+		}
+	}
+
+	return ModelInfo{}, NewGrailError(Unsupported, fmt.Sprintf("no model found for role=%s tier=%s", role, tier))
 }
 
 func (c *client) InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
@@ -865,6 +963,18 @@ func getOutputType(output Output) string {
 	default:
 		return "unknown"
 	}
+}
+
+// roleFromOutput determines the ModelRole from the Output type.
+func roleFromOutput(output Output) ModelRole {
+	if IsTextOutput(output) {
+		return ModelRoleText
+	}
+	if _, isImage := GetImageSpec(output); isImage {
+		return ModelRoleImage
+	}
+	// JSON output also uses text models
+	return ModelRoleText
 }
 
 // SniffImageMIME detects image MIME type from magic bytes.

@@ -17,7 +17,7 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gemini-2.5-flash
+//   - Text: gemini-3-flash-preview
 //   - Image: gemini-2.5-flash-image
 package gemini
 
@@ -37,7 +37,7 @@ import (
 
 const (
 	// DefaultTextModelName is the Gemini text model used when no override is provided.
-	DefaultTextModelName = "gemini-2.5-flash"
+	DefaultTextModelName = "gemini-3-flash-preview"
 	// DefaultImageModelName is the Gemini image model used when no override is provided.
 	DefaultImageModelName = "gemini-2.5-flash-image"
 )
@@ -263,6 +263,66 @@ func (c *Provider) Name() string {
 	return "gemini"
 }
 
+// ListModels returns all available Gemini models and their capabilities.
+func (c *Provider) ListModels(ctx context.Context) ([]grail.ModelInfo, error) {
+	return []grail.ModelInfo{
+		{
+			Name: "gemini-3-flash-preview",
+			Role: grail.ModelRoleText,
+			Tier: grail.ModelTierBest,
+			Capabilities: grail.ModelCapabilities{
+				Text:       true,
+				ImageInput: true,
+				PDFInput:   true,
+				JSON:       true,
+				Multimodal: true,
+			},
+			Description: "Latest Gemini 3 Flash model for text generation, supports multimodal inputs",
+			Tags:        []string{"best", "fast", "latest", "preview", "multimodal"},
+		},
+		{
+			Name: "gemini-2.5-flash",
+			Role: grail.ModelRoleText,
+			Tier: grail.ModelTierFast,
+			Capabilities: grail.ModelCapabilities{
+				Text:       true,
+				ImageInput: true,
+				PDFInput:   true,
+				JSON:       true,
+				Multimodal: true,
+			},
+			Description: "Gemini 2.5 Flash model for text generation, supports multimodal inputs",
+			Tags:        []string{"fast", "multimodal"},
+		},
+		{
+			Name: "gemini-2.5-flash-image",
+			Role: grail.ModelRoleImage,
+			Tier: grail.ModelTierBest,
+			Capabilities: grail.ModelCapabilities{
+				Image:      true,
+				ImageInput: true,
+				Multimodal: true,
+			},
+			Description: "Gemini 2.5 Flash model for image generation",
+			Tags:        []string{"fast", "image"},
+		},
+	}, nil
+}
+
+// ResolveModel resolves a role+tier to a model name.
+func (c *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
+	models, err := c.ListModels(context.Background())
+	if err != nil {
+		return "", err
+	}
+	for _, m := range models {
+		if m.Role == role && m.Tier == tier {
+			return m.Name, nil
+		}
+	}
+	return "", fmt.Errorf("gemini: no %s model with tier %s", role, tier)
+}
+
 // DoGenerate implements the ProviderExecutor interface.
 func (c *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
 	// Convert inputs to Gemini format
@@ -288,11 +348,17 @@ func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []
 	// Extract text options from provider options
 	var textOpts TextOptions
 	modelName := c.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				modelName = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					modelName = to.Model
+				}
 			}
 		}
 	}
@@ -343,15 +409,21 @@ func (c *Provider) generateImage(ctx context.Context, req grail.Request, parts [
 	modelName := c.imageModel
 	cfg := imageConfig{}
 
-	for _, opt := range req.ProviderOptions {
-		if io, ok := opt.(ImageOptions); ok {
-			imageOpts = io
-			if io.Model != "" {
-				modelName = io.Model
+	// Request.Model takes precedence for the image model
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if io, ok := opt.(ImageOptions); ok {
+				imageOpts = io
+				if io.Model != "" {
+					modelName = io.Model
+				}
 			}
-		}
-		if imgOpt, ok := opt.(ImageOption); ok {
-			imgOpt.apply(&cfg)
+			if imgOpt, ok := opt.(ImageOption); ok {
+				imgOpt.apply(&cfg)
+			}
 		}
 	}
 
@@ -403,11 +475,17 @@ func (c *Provider) generateJSON(ctx context.Context, req grail.Request, parts []
 	// Extract text options from provider options
 	var textOpts TextOptions
 	modelName := c.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				modelName = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		modelName = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					modelName = to.Model
+				}
 			}
 		}
 	}

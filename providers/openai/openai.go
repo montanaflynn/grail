@@ -336,6 +336,78 @@ func (p *Provider) Name() string {
 	return "openai"
 }
 
+// ListModels returns all available OpenAI models and their capabilities.
+func (p *Provider) ListModels(ctx context.Context) ([]grail.ModelInfo, error) {
+	return []grail.ModelInfo{
+		{
+			Name: shared.ChatModelGPT5_2,
+			Role: grail.ModelRoleText,
+			Tier: grail.ModelTierBest,
+			Capabilities: grail.ModelCapabilities{
+				Text:       true,
+				ImageInput: true,
+				PDFInput:   true,
+				JSON:       true,
+				Multimodal: true,
+			},
+			Description: "Latest GPT-5 model for text generation, supports multimodal inputs",
+			Tags:        []string{"best", "latest", "multimodal"},
+		},
+		{
+			Name: shared.ChatModelGPT4o,
+			Role: grail.ModelRoleText,
+			Tier: grail.ModelTierFast,
+			Capabilities: grail.ModelCapabilities{
+				Text:       true,
+				ImageInput: true,
+				PDFInput:   true,
+				JSON:       true,
+				Multimodal: true,
+			},
+			Description: "GPT-4o model for text generation, supports multimodal inputs",
+			Tags:        []string{"good", "multimodal"},
+		},
+		{
+			Name: openai.ImageModelGPTImage1,
+			Role: grail.ModelRoleImage,
+			Tier: grail.ModelTierBest,
+			Capabilities: grail.ModelCapabilities{
+				Image:      true,
+				ImageInput: true,
+				Multimodal: true,
+			},
+			Description: "Default image generation model",
+			Tags:        []string{"best", "image"},
+		},
+		{
+			Name: openai.ImageModelGPTImage1Mini,
+			Role: grail.ModelRoleImage,
+			Tier: grail.ModelTierFast,
+			Capabilities: grail.ModelCapabilities{
+				Image:      true,
+				ImageInput: true,
+				Multimodal: true,
+			},
+			Description: "Faster, lower-cost image generation model",
+			Tags:        []string{"fast", "image", "low-cost"},
+		},
+	}, nil
+}
+
+// ResolveModel resolves a role+tier to a model name.
+func (p *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		return "", err
+	}
+	for _, m := range models {
+		if m.Role == role && m.Tier == tier {
+			return m.Name, nil
+		}
+	}
+	return "", fmt.Errorf("openai: no %s model with tier %s", role, tier)
+}
+
 // DoGenerate implements the ProviderExecutor interface.
 func (p *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
 	// Convert inputs to OpenAI format
@@ -361,11 +433,17 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, item res
 	// Extract text options from provider options
 	var textOpts TextOptions
 	model := p.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				model = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		model = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					model = to.Model
+				}
 			}
 		}
 	}
@@ -435,16 +513,26 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 		moderation: ImageModerationAuto,
 	}
 
+	// Request.Model takes precedence for the language model
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	for _, opt := range req.ProviderOptions {
 		if io, ok := opt.(ImageOptions); ok {
 			imageOpts = io
-			if io.Model != "" {
-				model = io.Model
-			}
+			// ImageOptions.Model is for the image generation model, not language model
+			// We handle that separately below
 		}
 		if imgOpt, ok := opt.(ImageOption); ok {
 			imgOpt.apply(&cfg)
 		}
+	}
+
+	// Handle image model selection (separate from language model)
+	imageModel := p.imageModel
+	if imageOpts.Model != "" {
+		imageModel = imageOpts.Model
 	}
 
 	size := string(cfg.size)
@@ -458,7 +546,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 
 	imageGenParam := &responses.ToolImageGenerationParam{
 		Type:          "image_generation",
-		Model:         p.imageModel,
+		Model:         imageModel,
 		OutputFormat:  string(cfg.format),
 		Background:    string(cfg.background),
 		Moderation:    moderation,
@@ -494,7 +582,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 		// Log detailed request information
 		logFields := []any{
 			slog.String("language_model", model),
-			slog.String("image_model", p.imageModel),
+			slog.String("image_model", imageModel),
 			slog.String("output_format", string(cfg.format)),
 			slog.String("background", string(cfg.background)),
 			slog.String("size", size),
@@ -542,7 +630,7 @@ func (p *Provider) generateImage(ctx context.Context, req grail.Request, item re
 			Route: "responses",
 			Models: []grail.ModelUse{
 				{Role: "language", Name: model},
-				{Role: "image_generation", Name: p.imageModel},
+				{Role: "image_generation", Name: imageModel},
 			},
 		},
 		RequestID: resp.ID,
@@ -554,11 +642,17 @@ func (p *Provider) generateJSON(ctx context.Context, req grail.Request, item res
 	// JSON output is similar to text, but with response format
 	var textOpts TextOptions
 	model := p.textModel
-	for _, opt := range req.ProviderOptions {
-		if to, ok := opt.(TextOptions); ok {
-			textOpts = to
-			if to.Model != "" {
-				model = to.Model
+	// Request.Model takes precedence over provider default and ProviderOptions
+	if req.Model != "" {
+		model = req.Model
+	} else {
+		// Fall back to ProviderOptions if Request.Model not set
+		for _, opt := range req.ProviderOptions {
+			if to, ok := opt.(TextOptions); ok {
+				textOpts = to
+				if to.Model != "" {
+					model = to.Model
+				}
 			}
 		}
 	}
