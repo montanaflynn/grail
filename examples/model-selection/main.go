@@ -143,10 +143,11 @@ func main() {
 
 	// Collect and display results
 	if generateText {
-		fmt.Println("\n=== Text Generation Results ===\n")
+		fmt.Println("\n=== Text Generation Results ===")
 	} else {
-		fmt.Println("\n=== Image Generation Results ===\n")
+		fmt.Println("\n=== Image Generation Results ===")
 	}
+	fmt.Println()
 
 	for res := range resultsCh {
 		if res.err != nil {
@@ -180,10 +181,6 @@ func main() {
 			fmt.Println()
 		}
 	}
-
-	// Show available models
-	fmt.Println("=== Available Models ===\n")
-	showAvailableModels()
 }
 
 func generateTextWithTier(ctx context.Context, logger *slog.Logger, providerName string, tier grail.ModelTier, prompt string) result {
@@ -248,8 +245,9 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 	start := time.Now()
 
 	var (
-		provider grail.Provider
-		model    string
+		provider        grail.Provider
+		model           string
+		providerOptions []grail.ProviderOption
 	)
 
 	switch providerName {
@@ -271,10 +269,15 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 			return result{provider: providerName, tier: string(tier), err: err}
 		}
 		provider = p
+		// For OpenAI, the image model is specified via ImageOptions, not req.Model
+		// req.Model is the text model that orchestrates the request
 		if tier == grail.ModelTierBest {
 			model = p.BestImageModel().Name
 		} else {
 			model = p.FastImageModel().Name
+		}
+		providerOptions = []grail.ProviderOption{
+			openai.ImageOptions{Model: model},
 		}
 
 	default:
@@ -283,13 +286,18 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 
 	client := grail.NewClient(provider, grail.WithLogger(logger))
 
-	// For image generation, we need to use the image model directly
-	// since Tier resolution is based on output type
-	res, err := client.Generate(ctx, grail.Request{
-		Inputs: []grail.Input{grail.InputText(prompt)},
-		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
-		Model:  model, // Use the resolved image model directly
-	})
+	req := grail.Request{
+		Inputs:          []grail.Input{grail.InputText(prompt)},
+		Output:          grail.OutputImage(grail.ImageSpec{Count: 1}),
+		ProviderOptions: providerOptions,
+	}
+
+	// For Gemini, set the model directly; for OpenAI, it's in ProviderOptions
+	if providerName == "gemini" {
+		req.Model = model
+	}
+
+	res, err := client.Generate(ctx, req)
 	if err != nil {
 		return result{provider: providerName, tier: string(tier), model: model, err: err}
 	}
@@ -302,43 +310,4 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 		images:   images,
 		duration: time.Since(start),
 	}
-}
-
-func showAvailableModels() {
-	// OpenAI models
-	fmt.Println("OpenAI:")
-	fmt.Printf("  Best Text:  %s\n", openai.GPT5_2.Name)
-	fmt.Printf("    Capabilities: Text=%v, ImageUnderstanding=%v, PDF=%v, JSON=%v\n",
-		openai.GPT5_2.Capabilities.TextGeneration,
-		openai.GPT5_2.Capabilities.ImageUnderstanding,
-		openai.GPT5_2.Capabilities.PDFUnderstanding,
-		openai.GPT5_2.Capabilities.JSONOutput)
-
-	fmt.Printf("  Fast Text:  %s\n", openai.GPT4o.Name)
-	fmt.Printf("  Best Image: %s\n", openai.GPTImage1.Name)
-	fmt.Printf("    Capabilities: ImageGeneration=%v, ImageUnderstanding=%v\n",
-		openai.GPTImage1.Capabilities.ImageGeneration,
-		openai.GPTImage1.Capabilities.ImageUnderstanding)
-	fmt.Printf("  Fast Image: %s\n\n", openai.GPTImage1Mini.Name)
-
-	// Gemini models
-	fmt.Println("Gemini:")
-	fmt.Printf("  Best Text:  %s\n", gemini.Gemini3Pro.Name)
-	fmt.Printf("    Capabilities: Text=%v, ImageUnderstanding=%v, PDF=%v, JSON=%v\n",
-		gemini.Gemini3Pro.Capabilities.TextGeneration,
-		gemini.Gemini3Pro.Capabilities.ImageUnderstanding,
-		gemini.Gemini3Pro.Capabilities.PDFUnderstanding,
-		gemini.Gemini3Pro.Capabilities.JSONOutput)
-
-	fmt.Printf("  Fast Text:  %s\n", gemini.Gemini3Flash.Name)
-	fmt.Printf("  Best Image: %s\n", gemini.Gemini3ProImage.Name)
-	fmt.Printf("    Capabilities: ImageGeneration=%v, ImageUnderstanding=%v\n",
-		gemini.Gemini3ProImage.Capabilities.ImageGeneration,
-		gemini.Gemini3ProImage.Capabilities.ImageUnderstanding)
-	fmt.Printf("  Fast Image: %s\n\n", gemini.Gemini25FlashImage.Name)
-
-	// Other Gemini models
-	fmt.Println("  Other Gemini models (not best/fast):")
-	fmt.Printf("    %s\n", gemini.Gemini25Flash.Name)
-	fmt.Printf("    %s\n", gemini.Gemini25FlashLite.Name)
 }

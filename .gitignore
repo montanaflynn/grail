@@ -22,4 +22,4 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 
-model-selection
+/model-selection
