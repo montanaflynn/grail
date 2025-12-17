@@ -4,12 +4,15 @@
 // Usage:
 //
 //	go run examples/model-selection/main.go
-//	go run examples/model-selection/main.go -openai
-//	go run examples/model-selection/main.go -gemini
-//	go run examples/model-selection/main.go -openai -gemini
-//	go run examples/model-selection/main.go -best      # only best tier
-//	go run examples/model-selection/main.go -fast      # only fast tier
-//	go run examples/model-selection/main.go -debug
+//	go run examples/model-selection/main.go --openai
+//	go run examples/model-selection/main.go --gemini
+//	go run examples/model-selection/main.go --openai --gemini
+//	go run examples/model-selection/main.go --best
+//	go run examples/model-selection/main.go --fast
+//	go run examples/model-selection/main.go --text
+//	go run examples/model-selection/main.go --image
+//	go run examples/model-selection/main.go --gemini --image --best --fast
+//	go run examples/model-selection/main.go --debug
 package main
 
 import (
@@ -18,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -33,6 +37,7 @@ type result struct {
 	tier     string
 	model    string
 	text     string
+	images   [][]byte
 	duration time.Duration
 	err      error
 }
@@ -44,8 +49,15 @@ func main() {
 	geminiFlag := flag.Bool("gemini", false, "use Gemini provider")
 	bestFlag := flag.Bool("best", false, "only run best tier")
 	fastFlag := flag.Bool("fast", false, "only run fast tier")
+	textFlag := flag.Bool("text", false, "generate text (default)")
+	imageFlag := flag.Bool("image", false, "generate images")
 	debugFlag := flag.Bool("debug", false, "enable debug logging")
 	flag.Parse()
+
+	// Validate exclusive flags
+	if *textFlag && *imageFlag {
+		log.Fatal("--text and --image are mutually exclusive")
+	}
 
 	level := slog.LevelInfo
 	if *debugFlag {
@@ -63,10 +75,15 @@ func main() {
 	runBest := *bestFlag || (!*bestFlag && !*fastFlag)
 	runFast := *fastFlag || (!*bestFlag && !*fastFlag)
 
+	// Default to text if neither specified
+	generateText := *textFlag || (!*textFlag && !*imageFlag)
+	generateImage := *imageFlag
+
 	var wg sync.WaitGroup
 	resultsCh := make(chan result, 4)
 
-	prompt := "Explain quantum computing in exactly one sentence."
+	textPrompt := "Explain quantum computing in exactly one sentence."
+	imagePrompt := "A serene mountain lake at sunset with snow-capped peaks reflected in the water"
 
 	// Run generations
 	if runGemini {
@@ -74,16 +91,22 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := generateWithTier(ctx, logger, "gemini", grail.ModelTierBest, prompt)
-				resultsCh <- r
+				if generateImage {
+					resultsCh <- generateImageWithTier(ctx, logger, "gemini", grail.ModelTierBest, imagePrompt)
+				} else {
+					resultsCh <- generateTextWithTier(ctx, logger, "gemini", grail.ModelTierBest, textPrompt)
+				}
 			}()
 		}
 		if runFast {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := generateWithTier(ctx, logger, "gemini", grail.ModelTierFast, prompt)
-				resultsCh <- r
+				if generateImage {
+					resultsCh <- generateImageWithTier(ctx, logger, "gemini", grail.ModelTierFast, imagePrompt)
+				} else {
+					resultsCh <- generateTextWithTier(ctx, logger, "gemini", grail.ModelTierFast, textPrompt)
+				}
 			}()
 		}
 	}
@@ -93,16 +116,22 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := generateWithTier(ctx, logger, "openai", grail.ModelTierBest, prompt)
-				resultsCh <- r
+				if generateImage {
+					resultsCh <- generateImageWithTier(ctx, logger, "openai", grail.ModelTierBest, imagePrompt)
+				} else {
+					resultsCh <- generateTextWithTier(ctx, logger, "openai", grail.ModelTierBest, textPrompt)
+				}
 			}()
 		}
 		if runFast {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := generateWithTier(ctx, logger, "openai", grail.ModelTierFast, prompt)
-				resultsCh <- r
+				if generateImage {
+					resultsCh <- generateImageWithTier(ctx, logger, "openai", grail.ModelTierFast, imagePrompt)
+				} else {
+					resultsCh <- generateTextWithTier(ctx, logger, "openai", grail.ModelTierFast, textPrompt)
+				}
 			}()
 		}
 	}
@@ -113,15 +142,43 @@ func main() {
 	}()
 
 	// Collect and display results
-	fmt.Println("\n=== Model Selection Results ===\n")
+	if generateText {
+		fmt.Println("\n=== Text Generation Results ===\n")
+	} else {
+		fmt.Println("\n=== Image Generation Results ===\n")
+	}
 
 	for res := range resultsCh {
 		if res.err != nil {
 			log.Printf("[%s/%s] error: %v\n", res.provider, res.tier, res.err)
 			continue
 		}
+
 		fmt.Printf("[%s/%s] model: %s (%.2fs)\n", res.provider, res.tier, res.model, res.duration.Seconds())
-		fmt.Printf("  → %s\n\n", res.text)
+
+		if res.text != "" {
+			fmt.Printf("  → %s\n\n", res.text)
+		}
+
+		if len(res.images) > 0 {
+			// Save images to files
+			outputDir := "examples-output"
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				log.Printf("  → failed to create output dir: %v\n", err)
+				continue
+			}
+
+			for i, img := range res.images {
+				filename := fmt.Sprintf("%s-%s-%s-%d.png", res.provider, res.tier, time.Now().Format("20060102-150405"), i+1)
+				path := filepath.Join(outputDir, filename)
+				if err := os.WriteFile(path, img, 0644); err != nil {
+					log.Printf("  → failed to save image: %v\n", err)
+					continue
+				}
+				fmt.Printf("  → saved: %s\n", path)
+			}
+			fmt.Println()
+		}
 	}
 
 	// Show available models
@@ -129,12 +186,11 @@ func main() {
 	showAvailableModels()
 }
 
-func generateWithTier(ctx context.Context, logger *slog.Logger, providerName string, tier grail.ModelTier, prompt string) result {
+func generateTextWithTier(ctx context.Context, logger *slog.Logger, providerName string, tier grail.ModelTier, prompt string) result {
 	start := time.Now()
 
 	var (
 		provider grail.Provider
-		err      error
 		model    string
 	)
 
@@ -145,7 +201,6 @@ func generateWithTier(ctx context.Context, logger *slog.Logger, providerName str
 			return result{provider: providerName, tier: string(tier), err: err}
 		}
 		provider = p
-		// Get the model that will be used for this tier
 		if tier == grail.ModelTierBest {
 			model = p.BestTextModel().Name
 		} else {
@@ -158,7 +213,6 @@ func generateWithTier(ctx context.Context, logger *slog.Logger, providerName str
 			return result{provider: providerName, tier: string(tier), err: err}
 		}
 		provider = p
-		// Get the model that will be used for this tier
 		if tier == grail.ModelTierBest {
 			model = p.BestTextModel().Name
 		} else {
@@ -174,7 +228,7 @@ func generateWithTier(ctx context.Context, logger *slog.Logger, providerName str
 	res, err := client.Generate(ctx, grail.Request{
 		Inputs: []grail.Input{grail.InputText(prompt)},
 		Output: grail.OutputText(),
-		Tier:   tier, // Let the provider resolve the model based on tier
+		Tier:   tier,
 	})
 	if err != nil {
 		return result{provider: providerName, tier: string(tier), model: model, err: err}
@@ -186,6 +240,66 @@ func generateWithTier(ctx context.Context, logger *slog.Logger, providerName str
 		tier:     string(tier),
 		model:    model,
 		text:     text,
+		duration: time.Since(start),
+	}
+}
+
+func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerName string, tier grail.ModelTier, prompt string) result {
+	start := time.Now()
+
+	var (
+		provider grail.Provider
+		model    string
+	)
+
+	switch providerName {
+	case "gemini":
+		p, err := gemini.New(ctx, gemini.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
+		if err != nil {
+			return result{provider: providerName, tier: string(tier), err: err}
+		}
+		provider = p
+		if tier == grail.ModelTierBest {
+			model = p.BestImageModel().Name
+		} else {
+			model = p.FastImageModel().Name
+		}
+
+	case "openai":
+		p, err := openai.New(openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
+		if err != nil {
+			return result{provider: providerName, tier: string(tier), err: err}
+		}
+		provider = p
+		if tier == grail.ModelTierBest {
+			model = p.BestImageModel().Name
+		} else {
+			model = p.FastImageModel().Name
+		}
+
+	default:
+		return result{provider: providerName, tier: string(tier), err: fmt.Errorf("unknown provider")}
+	}
+
+	client := grail.NewClient(provider, grail.WithLogger(logger))
+
+	// For image generation, we need to use the image model directly
+	// since Tier resolution is based on output type
+	res, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{grail.InputText(prompt)},
+		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
+		Model:  model, // Use the resolved image model directly
+	})
+	if err != nil {
+		return result{provider: providerName, tier: string(tier), model: model, err: err}
+	}
+
+	images, _ := res.Images()
+	return result{
+		provider: providerName,
+		tier:     string(tier),
+		model:    model,
+		images:   images,
 		duration: time.Since(start),
 	}
 }
