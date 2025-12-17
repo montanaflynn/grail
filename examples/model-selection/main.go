@@ -22,6 +22,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -247,6 +248,7 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 	var (
 		provider        grail.Provider
 		model           string
+		reqModel        string
 		providerOptions []grail.ProviderOption
 	)
 
@@ -262,6 +264,7 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 		} else {
 			model = p.FastImageModel().Name
 		}
+		reqModel = model
 
 	case "openai":
 		p, err := openai.New(openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
@@ -269,16 +272,20 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 			return result{provider: providerName, tier: string(tier), err: err}
 		}
 		provider = p
-		// For OpenAI, the image model is specified via ImageOptions, not req.Model
-		// req.Model is the text model that orchestrates the request
+		// For OpenAI, the image model is specified via ImageOptions
+		// Don't set req.Model - let the provider use its default text model
+		// The response will include the actual models used
+		var imageModel string
 		if tier == grail.ModelTierBest {
-			model = p.BestImageModel().Name
+			imageModel = p.BestImageModel().Name
 		} else {
-			model = p.FastImageModel().Name
+			imageModel = p.FastImageModel().Name
 		}
+		model = imageModel // Will be updated from response
 		providerOptions = []grail.ProviderOption{
-			openai.ImageOptions{Model: model},
+			openai.ImageOptions{Model: imageModel},
 		}
+		// reqModel stays empty - provider uses its default
 
 	default:
 		return result{provider: providerName, tier: string(tier), err: fmt.Errorf("unknown provider")}
@@ -290,16 +297,21 @@ func generateImageWithTier(ctx context.Context, logger *slog.Logger, providerNam
 		Inputs:          []grail.Input{grail.InputText(prompt)},
 		Output:          grail.OutputImage(grail.ImageSpec{Count: 1}),
 		ProviderOptions: providerOptions,
-	}
-
-	// For Gemini, set the model directly; for OpenAI, it's in ProviderOptions
-	if providerName == "gemini" {
-		req.Model = model
+		Model:           reqModel,
 	}
 
 	res, err := client.Generate(ctx, req)
 	if err != nil {
 		return result{provider: providerName, tier: string(tier), model: model, err: err}
+	}
+
+	// Build model string from response (provider reports actual models used)
+	if len(res.Provider.Models) > 0 {
+		var modelNames []string
+		for _, m := range res.Provider.Models {
+			modelNames = append(modelNames, m.Name)
+		}
+		model = strings.Join(modelNames, ",")
 	}
 
 	images, _ := res.Images()

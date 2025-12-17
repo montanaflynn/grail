@@ -651,6 +651,14 @@ type ModelResolver interface {
 	ResolveModel(role ModelRole, tier ModelTier) (string, error)
 }
 
+// ModelDescriber describes what models will be used for a request.
+// Providers implement this to provide accurate logging when req.Model
+// doesn't fully describe the models (e.g., OpenAI image generation uses
+// both a text model and an image model).
+type ModelDescriber interface {
+	DescribeModels(req Request) string
+}
+
 // WithLogger sets a custom logger for client-level logs.
 func WithLogger(l *slog.Logger) ClientOption {
 	return clientOptFunc(func(co *clientOpt) {
@@ -764,10 +772,15 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 	}
 
 	if c.log != nil {
+		// Get model description - provider can override for complex cases
+		models := req.Model
+		if describer, ok := c.provider.(ModelDescriber); ok {
+			models = describer.DescribeModels(req)
+		}
 		c.log.Info("generate request",
 			slog.Int("inputs", len(req.Inputs)),
 			slog.String("output_type", getOutputType(req.Output)),
-			slog.String("model", req.Model),
+			slog.String("model", models),
 		)
 	}
 
@@ -811,7 +824,9 @@ func (c *client) validateModelCapabilities(req Request) error {
 	}
 
 	if _, isImage := GetImageSpec(req.Output); isImage {
-		if !model.Capabilities.ImageGeneration {
+		// Skip check if the model is a text model (used for orchestration in some providers like OpenAI)
+		// where the actual image model is specified in ProviderOptions
+		if !model.Capabilities.ImageGeneration && !model.Capabilities.TextGeneration {
 			return NewGrailError(InvalidArgument,
 				fmt.Sprintf("model %q does not support image generation; try an image model like one with ImageGeneration capability", req.Model))
 		}

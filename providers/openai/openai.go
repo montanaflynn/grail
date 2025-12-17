@@ -404,6 +404,38 @@ func (p *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (str
 	}
 }
 
+// DescribeModels returns a description of what models will be used for the request.
+// For image generation, this includes both the orchestrating text model and the image model.
+func (p *Provider) DescribeModels(req grail.Request) string {
+	// For text/JSON output, just return the model name
+	if grail.IsTextOutput(req.Output) || func() bool { _, _, ok := grail.GetJSONOutput(req.Output); return ok }() {
+		if req.Model != "" {
+			return req.Model
+		}
+		return p.textModel
+	}
+
+	// For image output, return both text model and image model
+	if _, isImage := grail.GetImageSpec(req.Output); isImage {
+		textModel := p.textModel
+		if req.Model != "" {
+			textModel = req.Model
+		}
+
+		imageModel := p.imageModel
+		// Check if ImageOptions specifies a different image model
+		for _, opt := range req.ProviderOptions {
+			if io, ok := opt.(ImageOptions); ok && io.Model != "" {
+				imageModel = io.Model
+			}
+		}
+
+		return textModel + "," + imageModel
+	}
+
+	return req.Model
+}
+
 // DoGenerate implements the ProviderExecutor interface.
 func (p *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
 	// Convert inputs to OpenAI format
