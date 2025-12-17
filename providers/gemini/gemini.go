@@ -334,6 +334,18 @@ func (c *Provider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (str
 	}
 }
 
+// DescribeModels returns a description of what models will be used for the request.
+func (c *Provider) DescribeModels(req grail.Request) string {
+	if req.Model != "" {
+		return req.Model
+	}
+	// Return default based on output type
+	if _, isImage := grail.GetImageSpec(req.Output); isImage {
+		return c.imageModel
+	}
+	return c.textModel
+}
+
 // DoGenerate implements the ProviderExecutor interface.
 func (c *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Response, error) {
 	// Convert inputs to Gemini format
