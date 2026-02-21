@@ -1,11 +1,12 @@
 // Text-to-image demonstrates image generation from text prompts.
-// It can run with OpenAI, Gemini, or both providers in parallel, generating images
+// It can run with OpenAI, Gemini, ModelsLab, or all providers in parallel, generating images
 // from text descriptions and saving them to the examples-output directory.
 //
 // Usage:
 //
 //	go run examples/text-to-image/main.go
 //	go run examples/text-to-image/main.go -openai
+//	go run examples/text-to-image/main.go -modelslab
 //	go run examples/text-to-image/main.go -gemini -debug
 package main
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/montanaflynn/grail"
 	"github.com/montanaflynn/grail/providers/gemini"
+	"github.com/montanaflynn/grail/providers/modelslab"
 	"github.com/montanaflynn/grail/providers/openai"
 )
 
@@ -31,6 +33,7 @@ func main() {
 
 	openaiFlag := flag.Bool("openai", false, "use OpenAI provider")
 	geminiFlag := flag.Bool("gemini", false, "use Gemini provider")
+	modelslabFlag := flag.Bool("modelslab", false, "use ModelsLab provider")
 	debugFlag := flag.Bool("debug", false, "enable debug logging")
 	flag.Parse()
 
@@ -43,8 +46,10 @@ func main() {
 	}))
 
 	// Determine which providers to run.
+	noneSet := !*openaiFlag && !*geminiFlag && !*modelslabFlag
 	runOpenAI := *openaiFlag
-	runGemini := *geminiFlag || (!*openaiFlag && !*geminiFlag) // default gemini if none set
+	runGemini := *geminiFlag || noneSet // default gemini if none set
+	runModelsLab := *modelslabFlag
 
 	type result struct {
 		provider string
@@ -70,6 +75,15 @@ func main() {
 			defer wg.Done()
 			images, err := generateWithProvider(ctx, logger, "openai", "OPENAI_API_KEY")
 			resultsCh <- result{provider: "openai", images: images, err: err}
+		}()
+	}
+
+	if runModelsLab {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			images, err := generateWithProvider(ctx, logger, "modelslab", "MODELSLAB_API_KEY")
+			resultsCh <- result{provider: "modelslab", images: images, err: err}
 		}()
 	}
 
@@ -108,6 +122,10 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	case "openai":
 		provider, err = openai.New(
 			openai.WithAPIKey(os.Getenv(envKey)),
+		)
+	case "modelslab":
+		provider, err = modelslab.New(
+			modelslab.WithAPIKey(os.Getenv(envKey)),
 		)
 	default:
 		return nil, fmt.Errorf("unknown provider %q", providerName)
