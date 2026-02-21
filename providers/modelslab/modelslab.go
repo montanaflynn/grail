@@ -243,15 +243,15 @@ func (p *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Res
 
 // text2imgRequest is the JSON body sent to ModelsLab.
 type text2imgRequest struct {
-	Key                string  `json:"key"`
-	Prompt             string  `json:"prompt"`
-	ModelID            string  `json:"model_id"`
-	Width              string  `json:"width"`
-	Height             string  `json:"height"`
-	Samples            string  `json:"samples"`
-	NumInferenceSteps  string  `json:"num_inference_steps"`
-	GuidanceScale      float64 `json:"guidance_scale"`
-	SafetyChecker      string  `json:"safety_checker"`
+	Key               string  `json:"key"`
+	Prompt            string  `json:"prompt"`
+	ModelID           string  `json:"model_id"`
+	Width             string  `json:"width"`
+	Height            string  `json:"height"`
+	Samples           string  `json:"samples"`
+	NumInferenceSteps string  `json:"num_inference_steps"`
+	GuidanceScale     float64 `json:"guidance_scale"`
+	SafetyChecker     string  `json:"safety_checker"`
 }
 
 // text2imgResponse is the JSON response from ModelsLab.
