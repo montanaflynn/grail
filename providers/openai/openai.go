@@ -17,11 +17,12 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gpt-5.2
-//   - Image: gpt-image-1
+//   - Text: gpt-5.4
+//   - Image: gpt-image-2
 //
 // Available image models:
-//   - gpt-image-1 (default)
+//   - gpt-image-2 (default)
+//   - gpt-image-1
 //   - gpt-image-1-mini
 package openai
 
@@ -47,9 +48,9 @@ import (
 
 const (
 	// DefaultTextModelName is the OpenAI text model used when no override is provided.
-	DefaultTextModelName = shared.ChatModelGPT5_2
+	DefaultTextModelName = shared.ChatModelGPT5_4
 	// DefaultImageModelName is the OpenAI image model used when no override is provided.
-	DefaultImageModelName = openai.ImageModelGPTImage1
+	DefaultImageModelName = "gpt-image-2"
 )
 
 var (
@@ -87,13 +88,13 @@ func WithAPIKeyFromEnv(env string) Option {
 	}
 }
 
-// WithTextModel overrides the default text model (default: gpt-5.2).
+// WithTextModel overrides the default text model (default: gpt-5.4).
 func WithTextModel(model string) Option {
 	return func(s *settings) { s.textModel = model }
 }
 
-// WithImageModel overrides the default image model (default: gpt-image-1).
-// Available models: gpt-image-1, gpt-image-1-mini
+// WithImageModel overrides the default image model (default: gpt-image-2).
+// Available models: gpt-image-2, gpt-image-1, gpt-image-1-mini
 func WithImageModel(model string) Option {
 	return func(s *settings) { s.imageModel = model }
 }
@@ -328,9 +329,9 @@ func New(opts ...Option) (*Provider, error) {
 		log:        cfg.logger,
 		imgFormat:  cfg.imgFormat,
 		// Initialize model catalog with defaults
-		bestTextModel:  GPT5_2,
-		fastTextModel:  GPT4o,
-		bestImageModel: GPTImage1,
+		bestTextModel:  GPT5_4,
+		fastTextModel:  GPT5_4Mini,
+		bestImageModel: GPTImage2,
 		fastImageModel: GPTImage1Mini,
 	}, nil
 }
