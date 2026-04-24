@@ -22,100 +22,60 @@ go get github.com/montanaflynn/grail
 ## Quick Start
 
 ```go
-// Create a provider (automatically uses OPENAI_API_KEY if not provided)
-provider, _ := openai.New()
+package main
 
-// Create a client
-client := grail.NewClient(provider)
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
 
-// Generate text
-res, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{grail.InputText("Create a haiku")},
-	Output: grail.OutputText(),
-})
-text, _ := res.Text()
-fmt.Println(text)
+	"github.com/montanaflynn/grail"
+	"github.com/montanaflynn/grail/providers/openai"
+	// Swap providers by importing another one instead:
+	// "github.com/montanaflynn/grail/providers/gemini"
+	// "github.com/montanaflynn/grail/providers/modelslab"
+)
 
-// Generate image
-imgRes, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{grail.InputText("A beautiful sunset")},
-	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
-})
-imgs, _ := imgRes.Images()
-os.WriteFile("sunset.png", imgs[0], 0644)
+func main() {
+	ctx := context.Background()
 
-// Generate image with provider-specific options
-import "github.com/montanaflynn/grail/providers/gemini"
-imgRes2, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{grail.InputText("A landscape photo")},
-	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
-	ProviderOptions: []grail.ProviderOption{
-		gemini.WithImageAspectRatio(gemini.ImageAspectRatio16_9),
-		gemini.WithImageSize(gemini.ImageSize2K),
-	},
-})
+	// Uses OPENAI_API_KEY from the environment.
+	// For Gemini:    provider, err := gemini.New(ctx)    (uses GEMINI_API_KEY)
+	// For ModelsLab: provider, err := modelslab.New()    (uses MODELSLAB_API_KEY)
+	provider, err := openai.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	client := grail.NewClient(provider)
 
-// Image understanding (text from image)
-imgData, _ := os.ReadFile("photo.jpg")
-imgInput := grail.InputImage(imgData)
-textRes, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{
-		grail.InputText("Describe this image"),
-		imgInput,
-	},
-	Output: grail.OutputText(),
-})
-text, _ := textRes.Text()
-fmt.Println(text)
+	// Generate text.
+	textRes, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{grail.InputText("Write a haiku about Go.")},
+		Output: grail.OutputText(),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	text, _ := textRes.Text()
+	fmt.Println(text)
 
-// Multimodal image generation (image from text + image)
-imgRes3, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{
-		grail.InputText("Create a variation of this image"),
-		imgInput,
-		grail.InputText("but make it more colorful"),
-	},
-	Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
-})
-imgs, _ := imgRes3.Images()
-os.WriteFile("variation.png", imgs[0], 0644)
-
-// PDF understanding (text from PDF)
-pdfData, _ := os.ReadFile("document.pdf")
-pdfRes, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{
-		grail.InputText("Summarize this document"),
-		grail.InputPDF(pdfData),
-	},
-	Output: grail.OutputText(),
-})
-text, _ := pdfRes.Text()
-fmt.Println(text)
-
-// Model selection: explicit model name
-res, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{grail.InputText("Hello")},
-	Output: grail.OutputText(),
-	Model:  "gpt-4o",  // Use this specific model
-})
-
-// Model selection: tier-based (provider picks the right model)
-res, _ := client.Generate(ctx, grail.Request{
-	Inputs: []grail.Input{grail.InputText("Hello")},
-	Output: grail.OutputText(),
-	Tier:   grail.ModelTierFast,  // Let provider pick the fast text model
-})
-
-// Query available models
-models, _ := client.ListModels(ctx)
-for _, m := range models {
-	fmt.Printf("%s: role=%s tier=%s\n", m.Name, m.Role, m.Tier)
+	// Generate an image.
+	imgRes, err := client.Generate(ctx, grail.Request{
+		Inputs: []grail.Input{grail.InputText("A beautiful sunset over the ocean.")},
+		Output: grail.OutputImage(grail.ImageSpec{Count: 1}),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	imgs, _ := imgRes.Images()
+	if err := os.WriteFile("sunset.png", imgs[0], 0644); err != nil {
+		log.Fatal(err)
+	}
 }
-
-// Get specific model by role and tier
-model, _ := client.GetModel(ctx, grail.ModelRoleText, grail.ModelTierBest)
-fmt.Printf("Best text model: %s\n", model.Name)
 ```
+
+See the [`examples/`](examples/) directory for more — image understanding, PDF input, multimodal generation, provider-specific options, and model selection.
 
 ## Examples
 
@@ -143,8 +103,8 @@ provider, err := openai.New()
 // With options
 provider, err := openai.New(
     openai.WithAPIKey("sk-..."),
-    openai.WithTextModel("gpt-4"),
-    openai.WithImageModel("gpt-image-1"),
+    openai.WithTextModel("gpt-5.4"),
+    openai.WithImageModel("gpt-image-2"),
     openai.WithLogger(logger),
 )
 ```
@@ -152,8 +112,8 @@ provider, err := openai.New(
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gpt-5.2`)
-- `WithImageModel(model string)` - Override default image model (default: `gpt-image-1`)
+- `WithTextModel(model string)` - Override default text model (default: `gpt-5.4`)
+- `WithImageModel(model string)` - Override default image model (default: `gpt-image-2`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
 **Image Options:**
@@ -177,8 +137,8 @@ provider, err := gemini.New(ctx)
 // With options
 provider, err := gemini.New(ctx,
     gemini.WithAPIKey("..."),
-    gemini.WithTextModel("gemini-3-flash-preview"),
-    gemini.WithImageModel("gemini-2.5-flash-image"),
+    gemini.WithTextModel("gemini-3.1-pro-preview"),
+    gemini.WithImageModel("gemini-3.1-flash-image-preview"),
     gemini.WithLogger(logger),
 )
 ```
@@ -186,8 +146,8 @@ provider, err := gemini.New(ctx,
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gemini-3-flash-preview`)
-- `WithImageModel(model string)` - Override default image model (default: `gemini-2.5-flash-image`)
+- `WithTextModel(model string)` - Override default text model (default: `gemini-3.1-pro-preview`)
+- `WithImageModel(model string)` - Override default image model (default: `gemini-3-pro-image-preview`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
 **Image Options:**

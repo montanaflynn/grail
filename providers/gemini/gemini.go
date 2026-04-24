@@ -17,8 +17,8 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gemini-3-flash-preview
-//   - Image: gemini-2.5-flash-image
+//   - Text: gemini-3.1-pro-preview
+//   - Image: gemini-3-pro-image-preview
 package gemini
 
 import (
@@ -37,7 +37,7 @@ import (
 
 const (
 	// DefaultTextModelName is the Gemini text model used when no override is provided.
-	DefaultTextModelName = "gemini-3-pro-preview"
+	DefaultTextModelName = "gemini-3.1-pro-preview"
 	// DefaultImageModelName is the Gemini image model used when no override is provided.
 	DefaultImageModelName = "gemini-3-pro-image-preview"
 )
@@ -255,10 +255,10 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
 		// Initialize model catalog with defaults
-		bestTextModel:  Gemini3Pro,
+		bestTextModel:  Gemini3_1Pro,
 		fastTextModel:  Gemini3Flash,
 		bestImageModel: Gemini3ProImage,
-		fastImageModel: Gemini25FlashImage,
+		fastImageModel: Gemini3_1FlashImage,
 	}, nil
 }
 

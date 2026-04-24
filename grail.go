@@ -212,7 +212,7 @@ const (
 // Model describes a model and its capabilities.
 // Providers export these as package-level variables for easy reference.
 type Model struct {
-	Name         string            // Model identifier (e.g., "gpt-5.2", "gemini-3-flash-preview")
+	Name         string            // Model identifier (e.g., "gpt-5.4", "gemini-3.1-pro-preview")
 	Role         ModelRole         // text or image
 	Tier         ModelTier         // best or fast
 	Capabilities ModelCapabilities // What the model can do
