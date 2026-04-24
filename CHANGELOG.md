@@ -2,6 +2,21 @@
 ## [Unreleased]
 
 
+<a name="v0.4.1"></a>
+## [v0.4.1] - 2026-04-24
+
+### Chores
+
+- **deps:** bump github.com/openai/openai-go/v3 from 3.14.0 to 3.26.0 ([#25](https://github.com/montanaflynn/grail/issues/25))
+- **deps:** bump google.golang.org/genai from 1.47.0 to 1.49.0 ([#24](https://github.com/montanaflynn/grail/issues/24))
+- **deps:** bump github.com/openai/openai-go/v3 from 3.14.0 to 3.22.0 ([#20](https://github.com/montanaflynn/grail/issues/20))
+- **deps:** bump google.golang.org/genai from 1.39.0 to 1.47.0 ([#19](https://github.com/montanaflynn/grail/issues/19))
+
+### Features
+
+- update defaults to latest OpenAI and Gemini models ([#36](https://github.com/montanaflynn/grail/issues/36))
+
+
 <a name="v0.4.0"></a>
 ## [v0.4.0] - 2026-02-21
 
@@ -115,7 +130,8 @@
 - initial release with unified AI provider interface
 
 
-[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/montanaflynn/grail/compare/v0.4.1...HEAD
+[v0.4.1]: https://github.com/montanaflynn/grail/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/montanaflynn/grail/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/montanaflynn/grail/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/montanaflynn/grail/compare/v0.2.1...v0.2.2
