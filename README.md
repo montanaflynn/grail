@@ -34,15 +34,13 @@ import (
 	"github.com/montanaflynn/grail/providers/openai"
 	// Swap providers by importing another one instead:
 	// "github.com/montanaflynn/grail/providers/gemini"
-	// "github.com/montanaflynn/grail/providers/modelslab"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Uses OPENAI_API_KEY from the environment.
-	// For Gemini:    provider, err := gemini.New(ctx)    (uses GEMINI_API_KEY)
-	// For ModelsLab: provider, err := modelslab.New()    (uses MODELSLAB_API_KEY)
+	// For Gemini: provider, err := gemini.New(ctx)    (uses GEMINI_API_KEY)
 	provider, err := openai.New()
 	if err != nil {
 		log.Fatal(err)
@@ -74,8 +72,6 @@ func main() {
 	}
 }
 ```
-
-See the [`examples/`](examples/) directory for more — image understanding, PDF input, multimodal generation, provider-specific options, and model selection.
 
 ## Examples
 
@@ -156,13 +152,6 @@ provider, err := gemini.New(ctx,
 
 **Text Options:**
 - `TextOptions{Model, MaxTokens, Temperature, TopP, SystemPrompt}` - Provider-specific text generation options
-
-## Links
-
-- [API Reference](https://pkg.go.dev/github.com/montanaflynn/grail)
-- [Providers](https://pkg.go.dev/github.com/montanaflynn/grail/providers)
-- [Examples](https://github.com/montanaflynn/grail/tree/main/examples)
-- [Changelog](https://github.com/montanaflynn/grail/blob/main/CHANGELOG.md)
 
 ## Development
 
