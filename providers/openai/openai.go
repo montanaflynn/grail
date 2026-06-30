@@ -50,7 +50,7 @@ const (
 	// DefaultTextModelName is the OpenAI text model used when no override is provided.
 	DefaultTextModelName = shared.ChatModelGPT5_4
 	// DefaultImageModelName is the OpenAI image model used when no override is provided.
-	DefaultImageModelName = "gpt-image-2"
+	DefaultImageModelName = openai.ImageModelGPTImage2
 )
 
 var (

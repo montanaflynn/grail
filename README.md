@@ -134,7 +134,7 @@ provider, err := gemini.New(ctx)
 provider, err := gemini.New(ctx,
     gemini.WithAPIKey("..."),
     gemini.WithTextModel("gemini-3.1-pro-preview"),
-    gemini.WithImageModel("gemini-3.1-flash-image-preview"),
+    gemini.WithImageModel("gemini-3.1-flash-image"),
     gemini.WithLogger(logger),
 )
 ```
@@ -143,7 +143,7 @@ provider, err := gemini.New(ctx,
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
 - `WithTextModel(model string)` - Override default text model (default: `gemini-3.1-pro-preview`)
-- `WithImageModel(model string)` - Override default image model (default: `gemini-3-pro-image-preview`)
+- `WithImageModel(model string)` - Override default image model (default: `gemini-3-pro-image`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
 **Image Options:**

@@ -1,6 +1,10 @@
 <a name="unreleased"></a>
 ## [Unreleased]
 
+### Features
+
+- update Gemini defaults to GA image models and Gemini 3.5 Flash fast tier
+- add skill for discovering LLM models via provider SDKs
 
 <a name="v0.4.1"></a>
 ## [v0.4.1] - 2026-04-24

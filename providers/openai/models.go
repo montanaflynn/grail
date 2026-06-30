@@ -77,7 +77,7 @@ var (
 	// GPTImage2 is the best quality image generation model, with reasoning,
 	// 2K output, multi-image coherence, and improved multilingual text rendering.
 	GPTImage2 = grail.Model{
-		Name: "gpt-image-2",
+		Name: openai.ImageModelGPTImage2,
 		Role: grail.ModelRoleImage,
 		Tier: grail.ModelTierBest,
 		Capabilities: grail.ModelCapabilities{
