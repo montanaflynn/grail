@@ -1,8 +1,27 @@
 <a name="unreleased"></a>
 ## [Unreleased]
 
+### Code Refactoring
+
+- make Client a concrete struct with a provider-selection seam
+
+### Documentation
+
+- reposition README around model churn and add compile-checked examples
+
 ### Features
 
+- **auto:** add FromEnv to build a client from provider API keys
+- **listmodels:** add anthropic and -diff against KnownModels, and a nightly model drift check
+- **listmodels:** acknowledge models and tighten new-model filter
+- **providers:** add Anthropic Claude provider (its TextOptions has no Temperature, TopP or TopK)
+- **providers:** send JSON schemas to native structured-output APIs
+- warn on deprecated models and support auto-migration
+- add text streaming for OpenAI, Gemini and Anthropic
+- route requests across multiple providers with fallback
+- add generic JSON[T] helper with schema derivation
+- add Text and Image convenience methods with call options
+- add deprecation metadata and KnownModels to model catalog
 - update Gemini defaults to GA image models and Gemini 3.5 Flash fast tier
 - add skill for discovering LLM models via provider SDKs
 - update OpenAI defaults to GPT-6 Astra/Luna and GPT Image 2.5 Sunburst/Flare
@@ -12,6 +31,11 @@
 
 - **deps:** bump github.com/openai/openai-go/v3 to 3.89.0 and google.golang.org/genai to 1.76.0
 - require Go 1.26 (needed by latest openai-go and Google Cloud deps)
+
+### BREAKING CHANGE
+
+- `grail.Client` is now a concrete struct: `grail.NewClient` returns `*grail.Client` instead of the `grail.Client` interface. Replace `grail.Client` with `*grail.Client` in your types; to fake the client in tests, wrap it in your own interface or use `providers/mock`.
+- When routing by tier or default model, a tier that no provider can resolve, or a request needing a capability no provider has, now returns a `grail.Unsupported` error instead of `grail.InvalidArgument`. Code checking `grail.GetErrorCode(err) == grail.InvalidArgument` for these cases should check `grail.Unsupported`.
 
 <a name="v0.4.1"></a>
 ## [v0.4.1] - 2026-04-24
