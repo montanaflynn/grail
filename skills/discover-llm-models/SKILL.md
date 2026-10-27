@@ -1,10 +1,10 @@
 ---
 name: discover-llm-models
 description: >-
-  Find current LLM model IDs from OpenAI and Gemini SDKs and official docs,
-  then audit or update grail provider defaults and model catalogs. Use when
-  checking for new model releases, updating default models, or listing available
-  models from provider APIs.
+  Find current LLM model IDs from OpenAI, Gemini and Anthropic SDKs and official
+  docs, then audit or update grail provider defaults and model catalogs. Use when
+  checking for new model releases, updating default models, listing available
+  models from provider APIs, or acting on a nightly `model-drift` issue.
 ---
 
 # Discover LLM models for grail
@@ -21,6 +21,8 @@ runtime discovery APIs.
 | `providers/openai/openai.go` | OpenAI defaults and `ListModels()` catalog |
 | `providers/gemini/models.go` | Gemini model constants |
 | `providers/gemini/gemini.go` | Gemini defaults and `ListModels()` catalog |
+| `providers/anthropic/models.go` | Anthropic model constants and `KnownModels()` |
+| `providers/anthropic/anthropic.go` | Anthropic defaults and `ListModels()` catalog |
 | `providers/modelslab/models.go` | ModelsLab image models (no SDK; check their API docs) |
 
 Selection priority in requests: explicit `Request.Model` > `Request.Tier` (`best`/`fast`) > provider default.
@@ -171,11 +173,79 @@ go run ./skills/discover-llm-models/cmd/listmodels -provider openai
 # Gemini — needs GEMINI_API_KEY
 go run ./skills/discover-llm-models/cmd/listmodels -provider gemini
 
-# Both
+# Anthropic — needs ANTHROPIC_API_KEY
+go run ./skills/discover-llm-models/cmd/listmodels -provider anthropic
+
+# Several, or all three
+go run ./skills/discover-llm-models/cmd/listmodels -provider gemini,anthropic
 go run ./skills/discover-llm-models/cmd/listmodels -provider all
 ```
 
 The helper prints model IDs sorted, one per line, to stdout. Errors are actionable (missing key, unknown provider).
+
+### Diff against grail's catalog
+
+```bash
+go run ./skills/discover-llm-models/cmd/listmodels -provider all -diff
+```
+
+`-diff` compares the live IDs with each provider's `KnownModels()` and prints a
+Markdown section per provider:
+
+- **Missing default/tier models**: `Default*ModelName` or a best/fast tier model
+  is gone from the API. grail selects these, so requests fail. Fix first.
+- **Missing**: a known model is gone from the API and grail has no past
+  `Deprecation.Shutdown` for it, so it was most likely shut down. Known models
+  already past their recorded shutdown date are expected to be gone and are not
+  listed. A known alias counts as present when the API lists a dated snapshot of
+  it (`claude-opus-4-5` via `claude-opus-4-5-20251101`). Anthropic models with
+  lifecycle `retired` count as gone.
+- **New**: served by the API but unknown to grail, filtered to text and image
+  generation models. The filter drops fine-tunes (`ft:`), `-latest` aliases,
+  snapshots (`-2026-10-20`, `-20251101`, `-0613`, `-001`) of an ID that is live
+  or known, Gemini models without `generateContent`, and IDs containing
+  `embed`, `tts`, `whisper`, `transcribe`, `audio`, `speech`, `realtime`,
+  `live`, `moderation`, `search`, `computer-use`, `sora`, `veo`, `gemma`, `aqa`
+  or `learnlm`. It also drops models older than grail's catalog: models released
+  before the newest known model (OpenAI and Anthropic report release dates), or,
+  where no dates are reported (Gemini), versions below the oldest default/tier
+  model (`gemini-2.5-pro` when the oldest tier is `gemini-3-pro-image`).
+
+Exit codes: `0` no missing models (new models alone are not an error), `1`
+missing known or default/tier models, `2` usage error, `3` a provider could not
+be listed (missing key or API error). The filtering and diff logic is a pure
+function in `cmd/listmodels/diff.go` with unit tests in `diff_test.go`.
+
+## Nightly drift check
+
+`.github/workflows/model-drift.yml` runs `listmodels -diff` every night (06:17
+UTC) and on manual dispatch. It reads the `OPENAI_API_KEY`, `GEMINI_API_KEY`
+and `ANTHROPIC_API_KEY` repo secrets and skips any provider whose secret is
+unset. It keeps a single open issue labeled `model-drift`:
+
+- Drift (any missing or new model): creates the issue, or replaces the body of
+  the open one with the latest diff. It never opens a second issue.
+- No drift: closes the open issue with a comment linking the run.
+- Missing models also fail the run, so the Actions tab shows it red. A listing
+  error (bad key, API outage) fails the run without touching the issue.
+
+### Acting on a `model-drift` issue
+
+1. Re-run the diff locally to confirm: `go run ./skills/discover-llm-models/cmd/listmodels -provider <name> -diff`.
+2. **Missing default/tier model**: pick a replacement from the provider docs,
+   update `Default*ModelName` and the best/fast slots in `New()`, and ship a
+   patch release. This is the urgent case.
+3. **Missing model**: confirm the shutdown in the provider's deprecations page or
+   changelog, then set `Deprecation.Shutdown` (and `Replacement`) on the
+   constant in `providers/<name>/models.go`. Do not delete the constant.
+4. **New model**: decide whether it belongs in grail. If yes, add a constant to
+   `models.go` and to `KnownModels()`, and consider whether it should become a
+   tier default (see below). A new model stays listed, and the issue stays open,
+   until grail knows it or grail adds a newer model (OpenAI, Anthropic) or a
+   newer tier generation (Gemini), so adding a niche model as a plain constant
+   is the simplest way to clear it.
+5. Run `make fmt-check lint test`. The issue closes itself on the next nightly
+   run with no drift, or trigger the workflow manually after merging.
 
 ## When to change defaults vs. only add constants
 
