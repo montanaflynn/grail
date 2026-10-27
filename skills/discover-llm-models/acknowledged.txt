@@ -1,0 +1,10 @@
+# Models served by provider APIs that grail deliberately leaves out of its
+# catalog. `listmodels -diff` does not report these as new.
+#
+# Format: one provider/model-id per line; text after "#" is a comment.
+# Give each entry a short reason. Remove an entry if grail later adds the model.
+
+gemini/gemini-3.7-flash             # deprecated 2026-10-08, routes to gemini-3.8-flash
+gemini/gemini-omni-1.1-flash        # omni model, not text/image catalog
+gemini/gemini-omni-flash-preview    # omni model preview, not text/image catalog
+gemini/nano-banana-pro-preview      # preview alias of gemini-3-pro-image

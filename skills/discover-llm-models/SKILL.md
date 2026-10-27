@@ -200,16 +200,23 @@ Markdown section per provider:
   listed. A known alias counts as present when the API lists a dated snapshot of
   it (`claude-opus-4-5` via `claude-opus-4-5-20251101`). Anthropic models with
   lifecycle `retired` count as gone.
-- **New**: served by the API but unknown to grail, filtered to text and image
-  generation models. The filter drops fine-tunes (`ft:`), `-latest` aliases,
-  snapshots (`-2026-10-20`, `-20251101`, `-0613`, `-001`) of an ID that is live
-  or known, Gemini models without `generateContent`, and IDs containing
-  `embed`, `tts`, `whisper`, `transcribe`, `audio`, `speech`, `realtime`,
-  `live`, `moderation`, `search`, `computer-use`, `sora`, `veo`, `gemma`, `aqa`
-  or `learnlm`. It also drops models older than grail's catalog: models released
+- **New**: served by the API but neither known to grail nor acknowledged in
+  `acknowledged.txt`, filtered to text and image generation models. The filter
+  drops fine-tunes (`ft:`), `-latest` aliases, snapshots (`-2026-10-20`,
+  `-20251101`, `-0613`, `-001`) and `-preview` variants of an ID that is live or
+  known (`gemini-3.1-flash-lite-preview` when `gemini-3.1-flash-lite` exists),
+  Gemini models without `generateContent`, and IDs containing `embed`, `tts`,
+  `whisper`, `transcribe`, `audio`, `speech`, `realtime`, `live`,
+  `moderation`, `search`, `computer-use`, `sora`, `veo`, `gemma`, `aqa`,
+  `learnlm`, `lyria`, `robotics`, `antigravity` or `-customtools`. It also drops models older than grail's catalog: models released
   before the newest known model (OpenAI and Anthropic report release dates), or,
   where no dates are reported (Gemini), versions below the oldest default/tier
   model (`gemini-2.5-pro` when the oldest tier is `gemini-3-pro-image`).
+
+`skills/discover-llm-models/acknowledged.txt` lists models a human decided grail
+does not need, one `provider/model-id` per line with a `# reason` comment. Pass
+a different file with `-ack`; the default path is relative to the repository
+root.
 
 Exit codes: `0` no missing models (new models alone are not an error), `1`
 missing known or default/tier models, `2` usage error, `3` a provider could not
@@ -238,12 +245,11 @@ unset. It keeps a single open issue labeled `model-drift`:
 3. **Missing model**: confirm the shutdown in the provider's deprecations page or
    changelog, then set `Deprecation.Shutdown` (and `Replacement`) on the
    constant in `providers/<name>/models.go`. Do not delete the constant.
-4. **New model**: decide whether it belongs in grail. If yes, add a constant to
-   `models.go` and to `KnownModels()`, and consider whether it should become a
-   tier default (see below). A new model stays listed, and the issue stays open,
-   until grail knows it or grail adds a newer model (OpenAI, Anthropic) or a
-   newer tier generation (Gemini), so adding a niche model as a plain constant
-   is the simplest way to clear it.
+4. **New model**: every new model needs one of two actions, or the issue stays
+   open. If it belongs in grail, add a constant to `models.go` and to
+   `KnownModels()`, and consider whether it should become a tier default (see
+   below). If not (deprecated alias, non-text/image family, niche preview), add
+   `provider/model-id  # reason` to `acknowledged.txt`.
 5. Run `make fmt-check lint test`. The issue closes itself on the next nightly
    run with no drift, or trigger the workflow manually after merging.
 

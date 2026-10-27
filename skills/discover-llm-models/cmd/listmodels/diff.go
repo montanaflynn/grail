@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"regexp"
@@ -30,7 +31,7 @@ type diffResult struct {
 	// regardless of their deprecation records.
 	MissingTiers []string
 	// New lists text and image generation models the API serves that grail
-	// does not know about. See isCandidate for the filter.
+	// neither knows about nor has acknowledged. See isCandidate for the filter.
 	New []string
 }
 
@@ -56,19 +57,21 @@ var (
 )
 
 // excludedTerms mark model families that do not generate text or images:
-// embeddings, speech and audio, realtime, moderation, search, video and
-// open-weight side families grail does not route to.
+// embeddings, speech, audio and music, realtime, moderation, search, video,
+// robotics, agent and tool-use variants, and open-weight side families grail
+// does not route to.
 var excludedTerms = []string{
 	"embed", "tts", "whisper", "transcribe", "audio", "speech", "realtime",
 	"live", "moderation", "search", "computer-use", "sora", "veo", "gemma",
-	"aqa", "learnlm",
+	"aqa", "learnlm", "lyria", "robotics", "antigravity", "-customtools",
 }
 
 // diffModels compares grail's known catalog with a provider's live models.
 // tiers holds the default and best/fast tier model IDs, which must be live.
 // Known models already shut down as of now are expected to be gone and are not
-// reported as missing.
-func diffModels(known []grail.Model, tiers []string, live []liveModel, now time.Time) diffResult {
+// reported as missing. Acknowledged IDs (see parseAcknowledged) are never
+// reported as new.
+func diffModels(known []grail.Model, tiers []string, live []liveModel, acked map[string]bool, now time.Time) diffResult {
 	liveIDs := map[string]bool{}
 	for _, m := range live {
 		if !m.Retired {
@@ -109,7 +112,7 @@ func diffModels(known []grail.Model, tiers []string, live []liveModel, now time.
 	cutoff := newestKnownRelease(live, knownIDs)
 	minVersion, hasMinVersion := lowestVersion(tiers)
 	for _, m := range live {
-		if knownIDs[m.ID] || !isCandidate(m, liveIDs, knownIDs) {
+		if knownIDs[m.ID] || acked[m.ID] || !isCandidate(m, liveIDs, knownIDs) {
 			continue
 		}
 		// Recency: anything released before grail's newest known model existed
@@ -137,8 +140,9 @@ func diffModels(known []grail.Model, tiers []string, live []liveModel, now time.
 // isCandidate reports whether an unknown live model is a text or image
 // generation model worth adding to grail. It drops retired models, fine-tunes,
 // "-latest" aliases, non-generation families (see excludedTerms), Gemini
-// models without generateContent, and snapshots of an ID that is already live
-// or known.
+// models without generateContent, and snapshots or previews of an ID that is
+// already live or known (gemini-3.1-flash-lite-preview when
+// gemini-3.1-flash-lite exists).
 func isCandidate(m liveModel, liveIDs, knownIDs map[string]bool) bool {
 	id := strings.ToLower(m.ID)
 	if m.Retired || strings.HasPrefix(id, "ft:") || strings.HasSuffix(id, "-latest") {
@@ -153,6 +157,9 @@ func isCandidate(m liveModel, liveIDs, knownIDs map[string]bool) bool {
 		return false
 	}
 	if base := snapshotBase(m.ID); base != m.ID && (liveIDs[base] || knownIDs[base]) {
+		return false
+	}
+	if base := strings.Replace(snapshotBase(m.ID), "-preview", "", 1); base != snapshotBase(m.ID) && (liveIDs[base] || knownIDs[base]) {
 		return false
 	}
 	return true
@@ -220,4 +227,29 @@ func writeDiff(w io.Writer, provider string, d diffResult) {
 	section("**Missing default/tier models** (grail selects these; requests will fail):", d.MissingTiers)
 	section("**Missing** (known to grail, gone from the API; likely shut down):", d.Missing)
 	section("**New** (served by the API, unknown to grail; text and image generation only):", d.New)
+}
+
+// parseAcknowledged reads acknowledged models, one provider/model-id per line,
+// and returns their IDs keyed by provider. Blank lines and text after "#" are
+// ignored. Acknowledged models are ones a human decided grail does not need.
+func parseAcknowledged(r io.Reader) (map[string]map[string]bool, error) {
+	acked := map[string]map[string]bool{}
+	scanner := bufio.NewScanner(r)
+	for n := 1; scanner.Scan(); n++ {
+		line, _, _ := strings.Cut(scanner.Text(), "#")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		provider, id, ok := strings.Cut(line, "/")
+		provider, id = strings.TrimSpace(provider), strings.TrimSpace(id)
+		if !ok || provider == "" || id == "" || strings.ContainsAny(id, " \t") {
+			return nil, fmt.Errorf("line %d: want provider/model-id, got %q", n, line)
+		}
+		if acked[provider] == nil {
+			acked[provider] = map[string]bool{}
+		}
+		acked[provider][id] = true
+	}
+	return acked, scanner.Err()
 }

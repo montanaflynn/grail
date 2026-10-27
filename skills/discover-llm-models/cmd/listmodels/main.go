@@ -1,7 +1,8 @@
 // Command listmodels prints model IDs from provider APIs for auditing grail defaults.
 //
 // With -diff it compares the live IDs against each provider's KnownModels()
-// and prints the drift as Markdown. Exit codes:
+// and prints the drift as Markdown. Models listed in the -ack file are not
+// reported as new. Exit codes:
 //
 //	0  success; in -diff mode, no missing models (new models alone are not an error)
 //	1  -diff found missing known models or missing default/tier models
@@ -35,6 +36,9 @@ const (
 	exitDrift = 1
 	exitUsage = 2
 	exitError = 3
+
+	// defaultAckPath is relative to the repository root.
+	defaultAckPath = "skills/discover-llm-models/acknowledged.txt"
 )
 
 // providers maps each provider name to its API key environment variable.
@@ -47,6 +51,7 @@ var providers = []struct{ name, env string }{
 func main() {
 	provider := flag.String("provider", "all", "Provider(s) to list, comma-separated: openai, gemini, anthropic, or all")
 	diff := flag.Bool("diff", false, "Compare live IDs against grail's KnownModels() and print missing and new models")
+	ackPath := flag.String("ack", defaultAckPath, "File of acknowledged provider/model-id lines excluded from new models in -diff mode")
 	flag.Parse()
 
 	names, err := parseProviders(*provider)
@@ -57,6 +62,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  listmodels -provider gemini,anthropic\n")
 		fmt.Fprintf(os.Stderr, "  listmodels -provider all -diff\n")
 		os.Exit(exitUsage)
+	}
+
+	var acked map[string]map[string]bool
+	if *diff {
+		acked, err = loadAcknowledged(*ackPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(exitUsage)
+		}
 	}
 
 	ctx := context.Background()
@@ -92,7 +106,7 @@ func main() {
 			failed = true
 			continue
 		}
-		d := diffModels(known, tiers, live, time.Now())
+		d := diffModels(known, tiers, live, acked[name], time.Now())
 		writeDiff(os.Stdout, name, d)
 		drifted = drifted || d.Breaking()
 	}
@@ -103,6 +117,26 @@ func main() {
 	case drifted:
 		os.Exit(exitDrift)
 	}
+}
+
+// loadAcknowledged reads the -ack file. A missing file at the default path
+// (when run outside the repository root) is treated as empty.
+func loadAcknowledged(path string) (map[string]map[string]bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) && path == defaultAckPath {
+		fmt.Fprintf(os.Stderr, "Warning: %s not found; no models acknowledged\n", path)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	acked, err := parseAcknowledged(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return acked, nil
 }
 
 // parseProviders splits a comma-separated provider list, expanding "all".
