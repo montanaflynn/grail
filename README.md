@@ -153,6 +153,39 @@ provider, err := gemini.New(ctx,
 **Text Options:**
 - `TextOptions{Model, MaxTokens, Temperature, TopP, SystemPrompt}` - Provider-specific text generation options
 
+### Anthropic
+
+Claude supports text and JSON output with text, image and PDF inputs. It has no image generation, so image output requests return a `grail.Unsupported` error.
+
+```go
+import "github.com/montanaflynn/grail/providers/anthropic"
+
+// Basic usage (uses ANTHROPIC_API_KEY env var)
+provider, err := anthropic.New()
+
+// With options
+provider, err := anthropic.New(
+    anthropic.WithAPIKey("sk-ant-..."),
+    anthropic.WithTextModel("claude-opus-5-5"),
+    anthropic.WithLogger(logger),
+)
+```
+
+**Options:**
+- `WithAPIKey(key string)` - Set API key explicitly
+- `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
+- `WithTextModel(model string)` - Override default text model (default: `claude-fable-5-1`)
+- `WithLogger(logger *slog.Logger)` - Set custom logger
+
+**Tiers:** `ModelTierBest` resolves to `claude-fable-5-1` and `ModelTierFast` to `claude-haiku-5-5`.
+
+**JSON output:** `grail.OutputJSON(schema)` uses the Messages API's structured outputs, which require `"additionalProperties": false` on every object in the schema. A nil schema asks for any JSON object through the system prompt.
+
+**Text Options:**
+- `TextOptions{Model, MaxTokens, SystemPrompt}` - Provider-specific text and JSON options (`MaxTokens` defaults to 16000)
+
+See [`examples/anthropic-text`](examples/anthropic-text/main.go) for a runnable example.
+
 ## Development
 
 ```bash
