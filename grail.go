@@ -576,25 +576,6 @@ func (f jsonOptFunc) applyJSONOpt(jo *jsonOpt) {
 // Client + Provider
 //
 
-type Client interface {
-	Generate(ctx context.Context, req Request) (Response, error)
-
-	// Explicit helpers for loading remote content (HTTP/S only).
-	// These helpers perform network I/O using the client's HTTP client
-	// and return concrete Inputs (bytes + MIME).
-	InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
-	InputImageFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
-	InputPDFFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error)
-
-	// ListModels returns all available models for the provider and their capabilities.
-	// Returns an error if the provider doesn't support model listing.
-	ListModels(ctx context.Context) ([]Model, error)
-
-	// GetModel returns the model matching the given role and tier.
-	// Returns an error if no matching model is found.
-	GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error)
-}
-
 type ClientOption interface{ applyClientOpt(*clientOpt) }
 
 func WithHTTPClient(hc *http.Client) ClientOption {
@@ -697,15 +678,19 @@ func WithLoggerFormat(format string, level LoggerLevel) ClientOption {
 	})
 }
 
-type client struct {
-	provider         ProviderExecutor
+// Client sends requests to a provider. Create one with NewClient.
+type Client struct {
+	// providers holds the executors in priority order. selectProvider picks
+	// which one serves a request.
+	providers        []ProviderExecutor
 	httpClient       *http.Client
 	downloadMaxBytes int64
 	downloadTimeout  time.Duration
 	log              *slog.Logger
 }
 
-func NewClient(p Provider, opts ...ClientOption) Client {
+// NewClient returns a Client that sends requests to p.
+func NewClient(p Provider, opts ...ClientOption) *Client {
 	co := &clientOpt{
 		httpClient:       http.DefaultClient,
 		downloadMaxBytes: 100 * 1024 * 1024, // 100 MB default
@@ -718,63 +703,39 @@ func NewClient(p Provider, opts ...ClientOption) Client {
 		}
 	}
 
-	executor, ok := p.(ProviderExecutor)
-	if !ok {
-		// This should not happen in practice, but handle gracefully
-		return &client{
-			provider:         nil,
-			httpClient:       co.httpClient,
-			downloadMaxBytes: co.downloadMaxBytes,
-			downloadTimeout:  co.downloadTimeout,
-			log:              co.logger,
-		}
-	}
-
-	if la, ok := p.(LoggerAware); ok {
-		la.SetLogger(co.logger)
-	}
-
-	return &client{
-		provider:         executor,
+	c := &Client{
 		httpClient:       co.httpClient,
 		downloadMaxBytes: co.downloadMaxBytes,
 		downloadTimeout:  co.downloadTimeout,
 		log:              co.logger,
 	}
+
+	// A provider that can't execute requests is dropped; Generate then
+	// reports that no provider is available.
+	if executor, ok := p.(ProviderExecutor); ok {
+		if la, ok := p.(LoggerAware); ok {
+			la.SetLogger(co.logger)
+		}
+		c.providers = append(c.providers, executor)
+	}
+
+	return c
 }
 
-func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
+func (c *Client) Generate(ctx context.Context, req Request) (Response, error) {
 	if err := validateRequest(req); err != nil {
 		return Response{}, err
 	}
 
-	if c.provider == nil {
-		return Response{}, NewGrailError(Internal, "provider executor not available")
-	}
-
-	// Resolve model selection: Model > Tier > Provider default
-	if req.Model == "" && req.Tier != "" {
-		role := roleFromOutput(req.Output)
-		if resolver, ok := c.provider.(ModelResolver); ok {
-			resolved, err := resolver.ResolveModel(role, req.Tier)
-			if err != nil {
-				return Response{}, NewGrailError(InvalidArgument, fmt.Sprintf("failed to resolve model for role=%s tier=%s: %v", role, req.Tier, err)).WithCause(err)
-			}
-			req.Model = resolved
-		}
-	}
-
-	// Validate model capabilities if model is specified and provider supports model listing
-	if req.Model != "" {
-		if err := c.validateModelCapabilities(req); err != nil {
-			return Response{}, err
-		}
+	provider, req, err := c.selectProvider(ctx, req)
+	if err != nil {
+		return Response{}, err
 	}
 
 	if c.log != nil {
 		// Get model description - provider can override for complex cases
 		models := req.Model
-		if describer, ok := c.provider.(ModelDescriber); ok {
+		if describer, ok := provider.(ModelDescriber); ok {
 			models = describer.DescribeModels(req)
 		}
 		c.log.Info("generate request",
@@ -784,18 +745,48 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 		)
 	}
 
-	return c.provider.DoGenerate(ctx, req)
+	return provider.DoGenerate(ctx, req)
+}
+
+// selectProvider picks the provider that will serve req and returns req with
+// its model resolved (Model > Tier > provider default). It also validates that
+// the resolved model supports the request's inputs and output.
+func (c *Client) selectProvider(ctx context.Context, req Request) (ProviderExecutor, Request, error) {
+	if len(c.providers) == 0 {
+		return nil, req, NewGrailError(Internal, "provider executor not available")
+	}
+	provider := c.providers[0]
+
+	if req.Model == "" && req.Tier != "" {
+		role := roleFromOutput(req.Output)
+		if resolver, ok := provider.(ModelResolver); ok {
+			resolved, err := resolver.ResolveModel(role, req.Tier)
+			if err != nil {
+				return nil, req, NewGrailError(InvalidArgument, fmt.Sprintf("failed to resolve model for role=%s tier=%s: %v", role, req.Tier, err)).WithCause(err)
+			}
+			req.Model = resolved
+		}
+	}
+
+	// Validate model capabilities if model is specified and provider supports model listing
+	if req.Model != "" {
+		if err := validateModelCapabilities(ctx, provider, req); err != nil {
+			return nil, req, err
+		}
+	}
+
+	return provider, req, nil
 }
 
 // validateModelCapabilities checks if the requested model supports the required capabilities.
-func (c *client) validateModelCapabilities(req Request) error {
-	lister, ok := c.provider.(ModelLister)
+func validateModelCapabilities(ctx context.Context, provider ProviderExecutor, req Request) error {
+	lister, ok := provider.(ModelLister)
 	if !ok {
 		// Provider doesn't support model listing, skip validation
 		return nil
 	}
 
-	models, err := lister.ListModels(context.Background())
+	models, err := lister.ListModels(ctx)
 	if err != nil {
 		// Can't list models, skip validation
 		return nil
@@ -861,20 +852,25 @@ func (c *client) validateModelCapabilities(req Request) error {
 	return nil
 }
 
-func (c *client) ListModels(ctx context.Context) ([]Model, error) {
-	if c.provider == nil {
+// ListModels returns all available models for the provider and their capabilities.
+// Returns an error if the provider doesn't support model listing.
+func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
+	if len(c.providers) == 0 {
 		return nil, NewGrailError(Internal, "provider executor not available")
 	}
+	provider := c.providers[0]
 
-	lister, ok := c.provider.(ModelLister)
+	lister, ok := provider.(ModelLister)
 	if !ok {
-		return nil, NewGrailError(Unsupported, fmt.Sprintf("provider %s does not support model listing", c.provider.Name()))
+		return nil, NewGrailError(Unsupported, fmt.Sprintf("provider %s does not support model listing", provider.Name()))
 	}
 
 	return lister.ListModels(ctx)
 }
 
-func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error) {
+// GetModel returns the model matching the given role and tier.
+// Returns an error if no matching model is found.
+func (c *Client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error) {
 	models, err := c.ListModels(ctx)
 	if err != nil {
 		return Model{}, err
@@ -889,19 +885,23 @@ func (c *client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (
 	return Model{}, NewGrailError(Unsupported, fmt.Sprintf("no model found for role=%s tier=%s", role, tier))
 }
 
-func (c *client) InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
+// InputFileFromURI downloads uri (HTTP/S only) using the client's HTTP client
+// and returns it as a file Input.
+func (c *Client) InputFileFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
 	return c.downloadFile(ctx, uri, "", opts...)
 }
 
-func (c *client) InputImageFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
+// InputImageFromURI downloads an image from uri (HTTP/S only) and returns it as an Input.
+func (c *Client) InputImageFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
 	return c.downloadFile(ctx, uri, "image/", opts...)
 }
 
-func (c *client) InputPDFFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
+// InputPDFFromURI downloads a PDF from uri (HTTP/S only) and returns it as an Input.
+func (c *Client) InputPDFFromURI(ctx context.Context, uri string, opts ...FileOpt) (Input, error) {
 	return c.downloadFile(ctx, uri, "application/pdf", opts...)
 }
 
-func (c *client) downloadFile(ctx context.Context, uri string, expectedMIME string, opts ...FileOpt) (Input, error) {
+func (c *Client) downloadFile(ctx context.Context, uri string, expectedMIME string, opts ...FileOpt) (Input, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.downloadTimeout)
 	defer cancel()
 

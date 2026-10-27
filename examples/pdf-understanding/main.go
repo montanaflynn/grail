@@ -141,7 +141,7 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client, pdfData, filename)
 }
 
-func generateText(ctx context.Context, client grail.Client, pdfData []byte, filename string) (string, error) {
+func generateText(ctx context.Context, client *grail.Client, pdfData []byte, filename string) (string, error) {
 	pdfInput := grail.InputPDF(pdfData, grail.WithFileName(filename))
 
 	res, err := client.Generate(ctx, grail.Request{
