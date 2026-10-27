@@ -216,6 +216,7 @@ type Model struct {
 	Role         ModelRole         // text or image
 	Tier         ModelTier         // best or fast
 	Capabilities ModelCapabilities // What the model can do
+	Deprecation  *Deprecation      // Non-nil if the provider has deprecated the model
 }
 
 // String returns the model name for use in requests.
