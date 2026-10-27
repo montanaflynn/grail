@@ -21,6 +21,7 @@ package mock
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/montanaflynn/grail"
 )
@@ -45,4 +46,28 @@ func (m *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Res
 		return grail.Response{}, grail.NewGrailError(grail.Internal, "mock GenerateFn not set").WithProviderName("mock")
 	}
 	return m.GenerateFn(ctx, req)
+}
+
+// CatalogProvider is a Provider with a model catalog. It resolves tiers and
+// lists models from Models, so a client can route requests by role and
+// capability. Return errors from GenerateFn to exercise fallback.
+type CatalogProvider struct {
+	Provider
+	Models []grail.Model
+}
+
+// ResolveModel implements grail.ModelResolver. It returns the first model in
+// Models with the given role and tier.
+func (m *CatalogProvider) ResolveModel(role grail.ModelRole, tier grail.ModelTier) (string, error) {
+	for _, model := range m.Models {
+		if model.Role == role && model.Tier == tier {
+			return model.Name, nil
+		}
+	}
+	return "", grail.NewGrailError(grail.Unsupported, fmt.Sprintf("mock: no %s model with tier %s", role, tier)).WithProviderName(m.Name())
+}
+
+// ListModels implements grail.ModelLister.
+func (m *CatalogProvider) ListModels(ctx context.Context) ([]grail.Model, error) {
+	return m.Models, nil
 }
