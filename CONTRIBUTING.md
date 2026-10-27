@@ -4,7 +4,7 @@ Contributing
 Thanks for helping improve Grail.
 
 Prerequisites
-- Go 1.22 or newer
+- Go 1.26 or newer
 
 Setup
 - Clone the repo
