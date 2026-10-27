@@ -618,6 +618,7 @@ type clientOpt struct {
 	downloadMaxBytes int64
 	downloadTimeout  time.Duration
 	logger           *slog.Logger
+	providers        []Provider // added by WithProviders, after the primary
 }
 
 type clientOptFunc func(*clientOpt)
@@ -688,10 +689,10 @@ func WithLoggerFormat(format string, level LoggerLevel) ClientOption {
 	})
 }
 
-// Client sends requests to a provider. Create one with NewClient.
+// Client sends requests to one or more providers. Create one with NewClient.
 type Client struct {
 	// providers holds the executors in priority order. selectProvider picks
-	// which one serves a request.
+	// which ones can serve a request.
 	providers        []ProviderExecutor
 	httpClient       *http.Client
 	downloadMaxBytes int64
@@ -699,7 +700,8 @@ type Client struct {
 	log              *slog.Logger
 }
 
-// NewClient returns a Client that sends requests to p.
+// NewClient returns a Client that sends requests to p, followed by any
+// providers added with WithProviders.
 func NewClient(p Provider, opts ...ClientOption) *Client {
 	co := &clientOpt{
 		httpClient:       http.DefaultClient,
@@ -720,10 +722,14 @@ func NewClient(p Provider, opts ...ClientOption) *Client {
 		log:              co.logger,
 	}
 
-	// A provider that can't execute requests is dropped; Generate then
-	// reports that no provider is available.
-	if executor, ok := p.(ProviderExecutor); ok {
-		if la, ok := p.(LoggerAware); ok {
+	// A provider that can't execute requests is dropped; if none are left,
+	// Generate reports that no provider is available.
+	for _, prov := range append([]Provider{p}, co.providers...) {
+		executor, ok := prov.(ProviderExecutor)
+		if !ok {
+			continue
+		}
+		if la, ok := prov.(LoggerAware); ok {
 			la.SetLogger(co.logger)
 		}
 		c.providers = append(c.providers, executor)
@@ -732,60 +738,26 @@ func NewClient(p Provider, opts ...ClientOption) *Client {
 	return c
 }
 
+// Generate sends req to the first provider that can serve it, falling back to
+// the next capable provider on a retryable error (see WithProviders).
 func (c *Client) Generate(ctx context.Context, req Request) (Response, error) {
 	if err := validateRequest(req); err != nil {
 		return Response{}, err
 	}
 
-	provider, req, err := c.selectProvider(ctx, req)
+	routes, err := c.selectProvider(ctx, req)
 	if err != nil {
 		return Response{}, err
 	}
 
-	if c.log != nil {
-		// Get model description - provider can override for complex cases
-		models := req.Model
-		if describer, ok := provider.(ModelDescriber); ok {
-			models = describer.DescribeModels(req)
-		}
-		c.log.Info("generate request",
-			slog.Int("inputs", len(req.Inputs)),
-			slog.String("output_type", getOutputType(req.Output)),
-			slog.String("model", models),
-		)
-	}
-
-	return provider.DoGenerate(ctx, req)
+	return c.generate(ctx, routes)
 }
 
-// selectProvider picks the provider that will serve req and returns req with
-// its model resolved (Model > Tier > provider default). It also validates that
-// the resolved model supports the request's inputs and output.
-func (c *Client) selectProvider(ctx context.Context, req Request) (ProviderExecutor, Request, error) {
-	if len(c.providers) == 0 {
-		return nil, req, NewGrailError(Internal, "provider executor not available")
-	}
-	provider := c.providers[0]
-
-	if req.Model == "" && req.Tier != "" {
-		role := roleFromOutput(req.Output)
-		if resolver, ok := provider.(ModelResolver); ok {
-			resolved, err := resolver.ResolveModel(role, req.Tier)
-			if err != nil {
-				return nil, req, NewGrailError(InvalidArgument, fmt.Sprintf("failed to resolve model for role=%s tier=%s: %v", role, req.Tier, err)).WithCause(err)
-			}
-			req.Model = resolved
-		}
-	}
-
-	// Validate model capabilities if model is specified and provider supports model listing
-	if req.Model != "" {
-		if err := validateModelCapabilities(ctx, provider, req); err != nil {
-			return nil, req, err
-		}
-	}
-
-	return provider, req, nil
+// selectProvider returns the providers that can serve req, in the order to
+// try them, each with req's model resolved (Model > Tier > provider default)
+// and its capabilities validated. See routes in router.go.
+func (c *Client) selectProvider(ctx context.Context, req Request) ([]route, error) {
+	return c.routes(ctx, req)
 }
 
 // validateModelCapabilities checks if the requested model supports the required capabilities.
@@ -862,24 +834,15 @@ func validateModelCapabilities(ctx context.Context, provider ProviderExecutor, r
 	return nil
 }
 
-// ListModels returns all available models for the provider and their capabilities.
-// Returns an error if the provider doesn't support model listing.
+// ListModels returns the models of every provider that supports model
+// listing, in priority order, with their capabilities. Returns an error if no
+// provider supports model listing.
 func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
-	if len(c.providers) == 0 {
-		return nil, NewGrailError(Internal, "provider executor not available")
-	}
-	provider := c.providers[0]
-
-	lister, ok := provider.(ModelLister)
-	if !ok {
-		return nil, NewGrailError(Unsupported, fmt.Sprintf("provider %s does not support model listing", provider.Name()))
-	}
-
-	return lister.ListModels(ctx)
+	return c.listModels(ctx)
 }
 
-// GetModel returns the model matching the given role and tier.
-// Returns an error if no matching model is found.
+// GetModel returns the first model, in provider priority order, matching the
+// given role and tier. Returns an error if no matching model is found.
 func (c *Client) GetModel(ctx context.Context, role ModelRole, tier ModelTier) (Model, error) {
 	models, err := c.ListModels(ctx)
 	if err != nil {

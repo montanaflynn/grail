@@ -413,12 +413,12 @@ func TestGenerateModelSelection(t *testing.T) {
 		})
 	}
 
-	t.Run("unresolvable tier is invalid argument", func(t *testing.T) {
+	t.Run("unresolvable tier is unsupported", func(t *testing.T) {
 		got := "unset"
 		client := grail.NewClient(newCatalogProvider(&got))
 		_, err := client.Generate(ctx, grail.Request{Inputs: text, Output: grail.OutputImage(grail.ImageSpec{}), Tier: grail.ModelTierFast})
-		if grail.GetErrorCode(err) != grail.InvalidArgument {
-			t.Fatalf("expected invalid_argument, got %v", err)
+		if grail.GetErrorCode(err) != grail.Unsupported {
+			t.Fatalf("expected unsupported, got %v", err)
 		}
 		if got != "unset" {
 			t.Fatalf("provider should not be called")
@@ -438,8 +438,8 @@ func TestGenerateValidatesCapabilities(t *testing.T) {
 			Output: grail.OutputText(),
 			Tier:   grail.ModelTierFast,
 		})
-		if grail.GetErrorCode(err) != grail.InvalidArgument {
-			t.Fatalf("expected invalid_argument, got %v", err)
+		if grail.GetErrorCode(err) != grail.Unsupported {
+			t.Fatalf("expected unsupported, got %v", err)
 		}
 		if got != "unset" {
 			t.Fatalf("provider should not be called")
