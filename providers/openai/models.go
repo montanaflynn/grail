@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"time"
+
 	"github.com/montanaflynn/grail"
 
 	"github.com/openai/openai-go/v3"
@@ -99,6 +101,10 @@ var (
 			PDFUnderstanding:   true,
 			JSONOutput:         true,
 		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2027, time.April, 1),
+			Replacement: GPT6Luna.Name,
+		},
 	}
 
 	// GPT5_2 is the previous-generation GPT-5.2 text model, retained for
@@ -124,6 +130,11 @@ var (
 			ImageUnderstanding: true,
 			PDFUnderstanding:   true,
 			JSONOutput:         true,
+		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2027, time.January, 14),
+			Replacement: GPT6Luna.Name,
+			Notes:       "GPT-4o snapshots are deprecated.",
 		},
 	}
 
@@ -171,6 +182,10 @@ var (
 			ImageGeneration:    true,
 			ImageUnderstanding: true,
 		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2026, time.October, 23),
+			Replacement: GPTImage2_5Sunburst.Name,
+		},
 	}
 
 	// GPTImage1Mini is a legacy low-cost image model. Deprecated with shutdown
@@ -182,5 +197,35 @@ var (
 			ImageGeneration:    true,
 			ImageUnderstanding: true,
 		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2026, time.December, 1),
+			Replacement: GPTImage2_5Flare.Name,
+		},
 	}
 )
+
+// KnownModels returns every model this package exports, including deprecated
+// and shut-down models. It implements grail.KnownModelLister.
+func (p *Provider) KnownModels() []grail.Model {
+	return []grail.Model{
+		GPT6Astra,
+		GPT6_1Sol,
+		GPT6_1Terra,
+		GPT6Luna,
+		GPT5_4,
+		GPT5_4Mini,
+		GPT5_4Nano,
+		GPT5_2,
+		GPT4o,
+		GPTImage2_5Sunburst,
+		GPTImage2_5Flare,
+		GPTImage2,
+		GPTImage1,
+		GPTImage1Mini,
+	}
+}
+
+// date returns midnight UTC on the given day.
+func date(year int, month time.Month, day int) time.Time {
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}

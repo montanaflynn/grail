@@ -1,6 +1,10 @@
 package gemini
 
-import "github.com/montanaflynn/grail"
+import (
+	"time"
+
+	"github.com/montanaflynn/grail"
+)
 
 // Model constants for Gemini models.
 // Use these directly in requests: grail.Request{Model: gemini.Gemini4Argon.Name}
@@ -114,6 +118,11 @@ var (
 			PDFUnderstanding:   true,
 			JSONOutput:         true,
 		},
+		Deprecation: &grail.Deprecation{
+			Announced:   date(2026, time.October, 8),
+			Replacement: Gemini3_8Flash.Name,
+			Notes:       "Requests are routed to gemini-3.6-flash.",
+		},
 	}
 
 	// Gemini3_1FlashLiteImage (Nano Banana 2 Lite) is an efficiency-focused
@@ -136,6 +145,10 @@ var (
 			ImageGeneration:    true,
 			ImageUnderstanding: true,
 		},
+		Deprecation: &grail.Deprecation{
+			Announced:   date(2026, time.October, 6),
+			Replacement: GeminiNanoBanana2_1.Name,
+		},
 	}
 
 	// Gemini3_1FlashLite is the GA cost-efficient text model for high-volume,
@@ -153,7 +166,7 @@ var (
 
 	// Gemini3Pro is the previous best text model. Deprecated and shut down
 	// on 2026-03-09 — kept as a symbol for backwards-compat; callers should
-	// migrate to Gemini3_1Pro.
+	// migrate to Gemini4Argon.
 	Gemini3Pro = grail.Model{
 		Name: "gemini-3-pro-preview",
 		Role: grail.ModelRoleText,
@@ -162,6 +175,10 @@ var (
 			ImageUnderstanding: true,
 			PDFUnderstanding:   true,
 			JSONOutput:         true,
+		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2026, time.March, 9),
+			Replacement: Gemini4Argon.Name,
 		},
 	}
 
@@ -176,6 +193,9 @@ var (
 			PDFUnderstanding:   true,
 			JSONOutput:         true,
 		},
+		Deprecation: &grail.Deprecation{
+			Replacement: Gemini3_8Flash.Name,
+		},
 	}
 
 	// Gemini3ProImagePreview is the preview image model, shut down on
@@ -187,16 +207,25 @@ var (
 			ImageGeneration:    true,
 			ImageUnderstanding: true,
 		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2026, time.June, 25),
+			Replacement: Gemini3ProImage.Name,
+		},
 	}
 
 	// Gemini3_1FlashImagePreview is the preview fast image model, shut down
-	// on 2026-06-25 — kept for backwards-compat; migrate to Gemini3_1FlashImage.
+	// on 2026-06-25 — kept for backwards-compat; migrate to GeminiNanoBanana2_1
+	// (its GA equivalent, Gemini3_1FlashImage, is itself deprecated).
 	Gemini3_1FlashImagePreview = grail.Model{
 		Name: "gemini-3.1-flash-image-preview",
 		Role: grail.ModelRoleImage,
 		Capabilities: grail.ModelCapabilities{
 			ImageGeneration:    true,
 			ImageUnderstanding: true,
+		},
+		Deprecation: &grail.Deprecation{
+			Shutdown:    date(2026, time.June, 25),
+			Replacement: GeminiNanoBanana2_1.Name,
 		},
 	}
 
@@ -235,3 +264,33 @@ var (
 		},
 	}
 )
+
+// KnownModels returns every model this package exports, including deprecated
+// and shut-down models. It implements grail.KnownModelLister.
+func (c *Provider) KnownModels() []grail.Model {
+	return []grail.Model{
+		Gemini4Argon,
+		Gemini3ProImage,
+		Gemini3_8Flash,
+		GeminiNanoBanana2_1,
+		Gemini3_1Pro,
+		Gemini3_6Flash,
+		Gemini3_5FlashLite,
+		Gemini3_5Flash,
+		Gemini3_1FlashLiteImage,
+		Gemini3_1FlashImage,
+		Gemini3_1FlashLite,
+		Gemini3Pro,
+		Gemini3Flash,
+		Gemini3ProImagePreview,
+		Gemini3_1FlashImagePreview,
+		Gemini25FlashImage,
+		Gemini25Flash,
+		Gemini25FlashLite,
+	}
+}
+
+// date returns midnight UTC on the given day.
+func date(year int, month time.Month, day int) time.Time {
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
