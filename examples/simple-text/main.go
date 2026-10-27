@@ -18,7 +18,7 @@ import (
 
 // Minimal text generation:
 // - Defaults: uses provider default model (gpt-6-astra for OpenAI), default logger, API key from OPENAI_API_KEY.
-// - Uncomment the logger options and provider options blocks below to customize.
+// - Uncomment the logger options and call options blocks below to customize.
 func main() {
 	ctx := context.Background()
 
@@ -41,21 +41,18 @@ func main() {
 		// grail.WithLoggerFormat("json", grail.LoggerLevels["debug"]),
 	)
 
-	res, err := client.Generate(ctx, grail.Request{
-		Inputs: []grail.Input{
-			grail.InputText("Say hello in one short sentence."),
-		},
-		Output: grail.OutputText(),
-		// ProviderOptions: []grail.ProviderOption{
-		// 	openai.TextOptions{
-		// 		Model:        "gpt-6-astra",
-		// 		MaxTokens:    grail.Pointer[int32](32),
-		// 		Temperature:  grail.Pointer[float32](0.4),
-		// 		TopP:         grail.Pointer[float32](0.9),
-		// 		SystemPrompt: "You are brief and friendly.",
-		// 	},
-		// },
-	})
+	text, err := client.Text(
+		ctx,
+		"Say hello in one short sentence.",
+		// Call options (uncomment to customize):
+		// grail.WithTier(grail.Fast),
+		// grail.WithProviderOptions(openai.TextOptions{
+		// 	MaxTokens:    grail.Pointer[int32](32),
+		// 	Temperature:  grail.Pointer[float32](0.4),
+		// 	TopP:         grail.Pointer[float32](0.9),
+		// 	SystemPrompt: "You are brief and friendly.",
+		// }),
+	)
 	if err != nil {
 		if grail.GetErrorCode(err) == grail.InvalidArgument {
 			log.Fatalf("fix request: %v", err)
@@ -63,6 +60,5 @@ func main() {
 		log.Fatalf("generate text: %v", err)
 	}
 
-	text, _ := res.Text()
 	fmt.Println(text)
 }
