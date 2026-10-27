@@ -654,7 +654,10 @@ type ModelDescriber interface {
 	DescribeModels(req Request) string
 }
 
-// WithLogger sets a custom logger for client-level logs.
+// WithLogger sets a custom logger for client-level logs. The default is
+// slog.Default(). Per-request details are logged at Debug, so they are hidden
+// at the default Info level; deprecation and fallback warnings are logged at
+// Warn.
 func WithLogger(l *slog.Logger) ClientOption {
 	return clientOptFunc(func(co *clientOpt) {
 		co.logger = l

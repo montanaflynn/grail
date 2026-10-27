@@ -79,7 +79,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq2[StreamEvent,
 			if describer, ok := rt.provider.(ModelDescriber); ok {
 				models = describer.DescribeModels(rt.req)
 			}
-			c.log.Info("stream request",
+			c.log.Debug("stream request",
 				slog.String("provider", rt.provider.Name()),
 				slog.Int("inputs", len(rt.req.Inputs)),
 				slog.String("model", models),

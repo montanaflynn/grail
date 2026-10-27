@@ -249,7 +249,7 @@ func (c *Client) attempt(ctx context.Context, rt route) (Response, error) {
 		if describer, ok := rt.provider.(ModelDescriber); ok {
 			models = describer.DescribeModels(rt.req)
 		}
-		c.log.Info("generate request",
+		c.log.Debug("generate request",
 			slog.String("provider", rt.provider.Name()),
 			slog.Int("inputs", len(rt.req.Inputs)),
 			slog.String("output_type", getOutputType(rt.req.Output)),
