@@ -238,8 +238,11 @@ func (c *Client) generate(ctx context.Context, routes []route) (Response, error)
 	return Response{}, NewGrailError(Internal, "no provider to try")
 }
 
-// attempt sends the request along a single route.
+// attempt sends the request along a single route, after checking its model
+// for deprecation (see WithAutoMigrate).
 func (c *Client) attempt(ctx context.Context, rt route) (Response, error) {
+	var warnings []Warning
+	rt.req, warnings = c.checkDeprecation(ctx, rt.provider, rt.req)
 	if c.log != nil {
 		// Get model description - provider can override for complex cases
 		models := rt.req.Model
@@ -253,7 +256,12 @@ func (c *Client) attempt(ctx context.Context, rt route) (Response, error) {
 			slog.String("model", models),
 		)
 	}
-	return rt.provider.DoGenerate(ctx, rt.req)
+	res, err := rt.provider.DoGenerate(ctx, rt.req)
+	if err != nil {
+		return Response{}, err
+	}
+	res.Warnings = append(warnings, res.Warnings...)
+	return res, nil
 }
 
 // shouldFallback reports whether err warrants trying the next provider.

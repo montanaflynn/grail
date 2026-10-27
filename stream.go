@@ -72,6 +72,8 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq2[StreamEvent,
 			return
 		}
 
+		var warnings []Warning
+		rt.req, warnings = c.checkDeprecation(ctx, rt.provider, rt.req)
 		if c.log != nil {
 			models := rt.req.Model
 			if describer, ok := rt.provider.(ModelDescriber); ok {
@@ -92,8 +94,11 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq2[StreamEvent,
 				yield(StreamEvent{}, err)
 				return
 			}
-			if ev.Done && ev.Provider.Name == "" {
-				ev.Provider.Name = rt.provider.Name()
+			if ev.Done {
+				if ev.Provider.Name == "" {
+					ev.Provider.Name = rt.provider.Name()
+				}
+				ev.Warnings = append(warnings, ev.Warnings...)
 			}
 			if !yield(ev, nil) {
 				return
