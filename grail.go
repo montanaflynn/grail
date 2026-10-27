@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -618,7 +619,9 @@ type clientOpt struct {
 	downloadMaxBytes int64
 	downloadTimeout  time.Duration
 	logger           *slog.Logger
-	providers        []Provider // added by WithProviders, after the primary
+	providers        []Provider       // added by WithProviders, after the primary
+	autoMigrate      bool             // set by WithAutoMigrate
+	now              func() time.Time // clock for shutdown checks
 }
 
 type clientOptFunc func(*clientOpt)
@@ -698,6 +701,9 @@ type Client struct {
 	downloadMaxBytes int64
 	downloadTimeout  time.Duration
 	log              *slog.Logger
+	autoMigrate      bool
+	now              func() time.Time
+	warned           sync.Map // deprecation warnings already logged, see warnOnce
 }
 
 // NewClient returns a Client that sends requests to p, followed by any
@@ -708,6 +714,7 @@ func NewClient(p Provider, opts ...ClientOption) *Client {
 		downloadMaxBytes: 100 * 1024 * 1024, // 100 MB default
 		downloadTimeout:  30 * time.Second,
 		logger:           slog.Default(),
+		now:              time.Now,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -720,6 +727,8 @@ func NewClient(p Provider, opts ...ClientOption) *Client {
 		downloadMaxBytes: co.downloadMaxBytes,
 		downloadTimeout:  co.downloadTimeout,
 		log:              co.logger,
+		autoMigrate:      co.autoMigrate,
+		now:              co.now,
 	}
 
 	// A provider that can't execute requests is dropped; if none are left,
