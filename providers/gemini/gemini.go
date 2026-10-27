@@ -522,10 +522,18 @@ func (c *Provider) generateJSON(ctx context.Context, req grail.Request, parts []
 		c.log.Debug("generate JSON request", slog.String("model", modelName))
 	}
 
-	config := &genai.GenerateContentConfig{}
+	schemaMap, err := grail.JSONSchemaMap(schema)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("invalid JSON schema: %v", err)).WithCause(err).WithProviderName("gemini")
+	}
+
+	config := &genai.GenerateContentConfig{
+		ResponseMIMEType: "application/json",
+	}
+	if schemaMap != nil {
+		config.ResponseJsonSchema = schemaMap
+	}
 	c.applyTextOptions(config, textOpts)
-	// Note: Gemini may support JSON mode via response_mime_type or similar
-	// For now, we'll generate text and validate as JSON
 
 	contents := []*genai.Content{
 		genai.NewContentFromParts(parts, genai.RoleUser),
