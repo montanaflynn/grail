@@ -5,6 +5,13 @@
 
 - update Gemini defaults to GA image models and Gemini 3.5 Flash fast tier
 - add skill for discovering LLM models via provider SDKs
+- update OpenAI defaults to GPT-6 Astra/Luna and GPT Image 2.5 Sunburst/Flare
+- update Gemini defaults to Gemini 4 Argon, Gemini 3.8 Flash, and Nano Banana 2.1
+
+### Chores
+
+- **deps:** bump github.com/openai/openai-go/v3 to 3.89.0 and google.golang.org/genai to 1.76.0
+- require Go 1.26 (needed by latest openai-go and Google Cloud deps)
 
 <a name="v0.4.1"></a>
 ## [v0.4.1] - 2026-04-24

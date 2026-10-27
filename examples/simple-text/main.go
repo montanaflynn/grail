@@ -17,7 +17,7 @@ import (
 )
 
 // Minimal text generation:
-// - Defaults: uses provider default model (gpt-5.2 for OpenAI), default logger, API key from OPENAI_API_KEY.
+// - Defaults: uses provider default model (gpt-6-astra for OpenAI), default logger, API key from OPENAI_API_KEY.
 // - Uncomment the logger options and provider options blocks below to customize.
 func main() {
 	ctx := context.Background()
@@ -26,8 +26,8 @@ func main() {
 	provider, err := openai.New(
 	// openai.WithAPIKey("sk-proj-*************"),
 	// openai.WithAPIKeyFromEnv("OPENAI_API_KEY"),
-	// openai.WithTextModel("gpt-5.2"),
-	// openai.WithImageModel("gpt-image-1"),
+	// openai.WithTextModel("gpt-6-astra"),
+	// openai.WithImageModel("gpt-image-2.5-sunburst"),
 	)
 	if err != nil {
 		log.Fatalf("new provider: %v", err)
@@ -48,7 +48,7 @@ func main() {
 		Output: grail.OutputText(),
 		// ProviderOptions: []grail.ProviderOption{
 		// 	openai.TextOptions{
-		// 		Model:        "gpt-5.2",
+		// 		Model:        "gpt-6-astra",
 		// 		MaxTokens:    grail.Pointer[int32](32),
 		// 		Temperature:  grail.Pointer[float32](0.4),
 		// 		TopP:         grail.Pointer[float32](0.9),

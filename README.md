@@ -99,8 +99,8 @@ provider, err := openai.New()
 // With options
 provider, err := openai.New(
     openai.WithAPIKey("sk-..."),
-    openai.WithTextModel("gpt-5.4"),
-    openai.WithImageModel("gpt-image-2"),
+    openai.WithTextModel("gpt-6-astra"),
+    openai.WithImageModel("gpt-image-2.5-sunburst"),
     openai.WithLogger(logger),
 )
 ```
@@ -108,8 +108,8 @@ provider, err := openai.New(
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gpt-5.4`)
-- `WithImageModel(model string)` - Override default image model (default: `gpt-image-2`)
+- `WithTextModel(model string)` - Override default text model (default: `gpt-6-astra`)
+- `WithImageModel(model string)` - Override default image model (default: `gpt-image-2.5-sunburst`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
 **Image Options:**
@@ -133,8 +133,8 @@ provider, err := gemini.New(ctx)
 // With options
 provider, err := gemini.New(ctx,
     gemini.WithAPIKey("..."),
-    gemini.WithTextModel("gemini-3.1-pro-preview"),
-    gemini.WithImageModel("gemini-3.1-flash-image"),
+    gemini.WithTextModel("gemini-4-argon"),
+    gemini.WithImageModel("gemini-nano-banana-2.1"),
     gemini.WithLogger(logger),
 )
 ```
@@ -142,7 +142,7 @@ provider, err := gemini.New(ctx,
 **Options:**
 - `WithAPIKey(key string)` - Set API key explicitly
 - `WithAPIKeyFromEnv(env string)` - Read API key from environment variable
-- `WithTextModel(model string)` - Override default text model (default: `gemini-3.1-pro-preview`)
+- `WithTextModel(model string)` - Override default text model (default: `gemini-4-argon`)
 - `WithImageModel(model string)` - Override default image model (default: `gemini-3-pro-image`)
 - `WithLogger(logger *slog.Logger)` - Set custom logger
 
