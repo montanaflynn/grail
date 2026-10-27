@@ -222,7 +222,7 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 	cfg := settings{
 		textModel:  DefaultTextModelName,
 		imageModel: DefaultImageModelName,
-		logger:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		logger:     slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(&cfg)

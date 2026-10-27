@@ -222,6 +222,7 @@ fmt.Println(res.Provider.Name+":", text)
 - Model selection: `Request.Model` beats `Request.Tier`, which beats the provider's default. `client.ListModels` and `client.GetModel(ctx, role, tier)` show the catalog across providers.
 - Errors carry a code: `grail.GetErrorCode(err)` returns `InvalidArgument`, `Unauthorized`, `RateLimited`, `Timeout`, `Unavailable`, `Unsupported`, `Refused`, `OutputInvalid` or `Internal`, and `grail.IsRetryable(err)` reports whether a retry may help.
 - Client options: `WithProviders`, `WithAutoMigrate`, `WithLogger`, `WithLoggerFormat`, `WithHTTPClient`, `WithDownloadLimits`.
+- Logging: quiet by default. Per-request details are logged at Debug; deprecation and fallback warnings at Warn. Use `grail.WithLoggerFormat("text", grail.LoggerLevelDebug)` to see every request.
 
 ## Examples
 

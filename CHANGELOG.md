@@ -11,6 +11,7 @@
 
 ### Features
 
+- log per-request details at Debug so the client is quiet by default
 - **auto:** add FromEnv to build a client from provider API keys
 - **listmodels:** add anthropic and -diff against KnownModels, and a nightly model drift check
 - **listmodels:** acknowledge models and tighten new-model filter
