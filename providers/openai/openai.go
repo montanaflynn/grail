@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"os"
 	"strings"
@@ -463,7 +464,9 @@ func (p *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Res
 	return grail.Response{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("unsupported output type: %T", req.Output)).WithProviderName("openai")
 }
 
-func (p *Provider) generateText(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam) (grail.Response, error) {
+// textParams builds Responses API params for text output. The model is
+// Request.Model, else TextOptions.Model, else the provider default.
+func (p *Provider) textParams(req grail.Request, item responses.ResponseInputItemUnionParam) (responses.ResponseNewParams, string) {
 	// Extract text options from provider options
 	var textOpts TextOptions
 	model := p.textModel
@@ -480,10 +483,6 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, item res
 				}
 			}
 		}
-	}
-
-	if p.log != nil {
-		p.log.Debug("openai generate text request", slog.String("model", model))
 	}
 
 	params := responses.ResponseNewParams{
@@ -504,6 +503,15 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, item res
 	}
 	if textOpts.TopP != nil {
 		params.TopP = openai.Float(float64(*textOpts.TopP))
+	}
+	return params, model
+}
+
+func (p *Provider) generateText(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam) (grail.Response, error) {
+	params, model := p.textParams(req, item)
+
+	if p.log != nil {
+		p.log.Debug("openai generate text request", slog.String("model", model))
 	}
 
 	resp, err := p.client.Responses.New(ctx, params)
@@ -534,6 +542,76 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, item res
 		RequestID: resp.ID,
 		Warnings:  extractWarnings(resp),
 	}, nil
+}
+
+// DoStream implements grail.StreamExecutor using Responses API streaming.
+// Only text output is supported.
+func (p *Provider) DoStream(ctx context.Context, req grail.Request) iter.Seq2[grail.StreamEvent, error] {
+	return func(yield func(grail.StreamEvent, error) bool) {
+		if !grail.IsTextOutput(req.Output) {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("openai: streaming supports text output only, got %T", req.Output)).WithProviderName("openai"))
+			return
+		}
+		item, err := p.toResponseInput(req.Inputs)
+		if err != nil {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("failed to convert inputs: %v", err)).WithCause(err).WithProviderName("openai"))
+			return
+		}
+		params, model := p.textParams(req, item)
+
+		if p.log != nil {
+			p.log.Debug("openai stream text request", slog.String("model", model))
+		}
+
+		// Canceling the context and closing the stream releases the
+		// connection when the consumer stops early.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stream := p.client.Responses.NewStreaming(ctx, params)
+		defer stream.Close()
+
+		for stream.Next() {
+			ev := stream.Current()
+			switch ev.Type {
+			case "response.output_text.delta":
+				if ev.Delta != "" && !yield(grail.StreamEvent{Text: ev.Delta}, nil) {
+					return
+				}
+			case "response.completed", "response.incomplete":
+				usage := extractUsage(&ev.Response)
+				if p.log != nil {
+					p.log.Debug("openai stream text response", slog.Any("usage", usage))
+				}
+				final := grail.StreamEvent{
+					Done:  true,
+					Usage: usage,
+					Provider: grail.ProviderInfo{
+						Name:   "openai",
+						Route:  "responses",
+						Models: []grail.ModelUse{{Role: "language", Name: model}},
+					},
+					RequestID: ev.Response.ID,
+				}
+				if reason := ev.Response.IncompleteDetails.Reason; reason != "" {
+					final.Warnings = []grail.Warning{{Code: "incomplete", Message: "response incomplete: " + reason}}
+				}
+				yield(final, nil)
+				return
+			case "response.failed":
+				e := ev.Response.Error
+				yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("openai stream text failed: %s: %s", e.Code, e.Message)).WithProviderName("openai").WithRequestID(ev.Response.ID).WithRetryable(e.Code == "server_error" || e.Code == "rate_limit_exceeded"))
+				return
+			case "error":
+				yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("openai stream text failed: %s: %s", ev.Code, ev.Message)).WithProviderName("openai"))
+				return
+			}
+		}
+		if err := stream.Err(); err != nil {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("openai stream text failed: %v", err)).WithCause(err).WithProviderName("openai").WithRetryable(isRetryableError(err)))
+			return
+		}
+		yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, "openai stream text ended before the response completed").WithProviderName("openai").WithRetryable(true))
+	}
 }
 
 func (p *Provider) generateImage(ctx context.Context, req grail.Request, item responses.ResponseInputItemUnionParam, spec grail.ImageSpec) (grail.Response, error) {
@@ -853,8 +931,7 @@ func (p *Provider) toResponseInput(inputs []grail.Input) (responses.ResponseInpu
 			continue
 		}
 
-		// FileReaderInput - read into memory for now
-		// TODO: support streaming if OpenAI API supports it
+		// FileReaderInput - not supported yet
 		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("input %d: FileReaderInput not yet supported", i)
 	}
 

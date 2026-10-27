@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"net/http"
 	"os"
@@ -324,6 +325,76 @@ func (p *Provider) generateText(ctx context.Context, req grail.Request, content 
 		RequestID: msg.ID,
 		Warnings:  extractWarnings(msg),
 	}, nil
+}
+
+// DoStream implements grail.StreamExecutor using Messages API streaming.
+// Only text output is supported.
+func (p *Provider) DoStream(ctx context.Context, req grail.Request) iter.Seq2[grail.StreamEvent, error] {
+	return func(yield func(grail.StreamEvent, error) bool) {
+		if !grail.IsTextOutput(req.Output) {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("anthropic: streaming supports text output only, got %T", req.Output)).WithProviderName(providerName))
+			return
+		}
+		content, err := toContentBlocks(req.Inputs)
+		if err != nil {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("failed to convert inputs: %v", err)).WithCause(err).WithProviderName(providerName))
+			return
+		}
+		params, model := p.newParams(req, content, "")
+
+		if p.log != nil {
+			p.log.Debug("anthropic stream text request", slog.String("model", model))
+		}
+
+		// Canceling the context and closing the stream releases the
+		// connection when the consumer stops early.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stream := p.client.Messages.NewStreaming(ctx, params)
+		defer stream.Close()
+
+		var msg anthropic.Message
+		var stopped bool
+		for stream.Next() {
+			ev := stream.Current()
+			if err := msg.Accumulate(ev); err != nil {
+				yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("anthropic stream text failed: %v", err)).WithCause(err).WithProviderName(providerName))
+				return
+			}
+			switch ev.Type {
+			case "content_block_delta":
+				if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" && !yield(grail.StreamEvent{Text: ev.Delta.Text}, nil) {
+					return
+				}
+			case "message_stop":
+				stopped = true
+			}
+		}
+		if err := stream.Err(); err != nil {
+			yield(grail.StreamEvent{}, toGrailError("stream text", err))
+			return
+		}
+		if !stopped {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, "anthropic stream text ended before message_stop").WithProviderName(providerName).WithRequestID(msg.ID).WithRetryable(true))
+			return
+		}
+		if err := checkRefusal(&msg); err != nil {
+			yield(grail.StreamEvent{}, err)
+			return
+		}
+
+		usage := extractUsage(&msg)
+		if p.log != nil {
+			p.log.Debug("anthropic stream text response", slog.Any("usage", usage))
+		}
+		yield(grail.StreamEvent{
+			Done:      true,
+			Usage:     usage,
+			Provider:  providerInfo(model),
+			RequestID: msg.ID,
+			Warnings:  extractWarnings(&msg),
+		}, nil)
+	}
 }
 
 func (p *Provider) generateJSON(ctx context.Context, req grail.Request, content []anthropic.ContentBlockParamUnion, schema any, strict bool) (grail.Response, error) {
