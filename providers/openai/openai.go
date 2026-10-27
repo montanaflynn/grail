@@ -695,13 +695,30 @@ func (p *Provider) generateJSON(ctx context.Context, req grail.Request, item res
 		p.log.Debug("openai generate JSON request", slog.String("model", model))
 	}
 
+	schemaMap, err := grail.JSONSchemaMap(schema)
+	if err != nil {
+		return grail.Response{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("invalid JSON schema: %v", err)).WithCause(err).WithProviderName("openai")
+	}
+
+	// Use structured outputs when a schema is given, otherwise JSON-object mode.
+	var format responses.ResponseFormatTextConfigUnionParam
+	if schemaMap != nil {
+		format.OfJSONSchema = &responses.ResponseFormatTextJSONSchemaConfigParam{
+			Name:   "output",
+			Schema: schemaMap,
+			Strict: param.NewOpt(strict),
+		}
+	} else {
+		jsonObject := shared.NewResponseFormatJSONObjectParam()
+		format.OfJSONObject = &jsonObject
+	}
+
 	params := responses.ResponseNewParams{
 		Model: shared.ChatModel(model),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: responses.ResponseInputParam{item},
 		},
-		// Note: JSON mode may not be available in all SDK versions
-		// If ResponseFormat is not available, we'll validate JSON manually
+		Text: responses.ResponseTextConfigParam{Format: format},
 	}
 
 	if textOpts.SystemPrompt != "" {

@@ -2,13 +2,19 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/montanaflynn/grail"
+
+	"google.golang.org/genai"
 )
 
 // Compile-time check that Provider implements grail.Provider.
@@ -192,4 +198,145 @@ func TestKnownModels_DeprecationRecords(t *testing.T) {
 		Gemini3_1FlashImage.Name:        {announced: "2026-10-06", replacement: "gemini-nano-banana-2.1"},
 		Gemini3Flash.Name:               {replacement: "gemini-3.8-flash"},
 	})
+}
+
+// newTestProvider returns a provider whose client talks to an httptest server
+// that records each request body and replies with a candidate containing text.
+func newTestProvider(t *testing.T, text string) (*Provider, *[]map[string]any) {
+	t.Helper()
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []any{map[string]any{
+				"content": map[string]any{
+					"role":  "model",
+					"parts": []any{map[string]any{"text": text}},
+				},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	p, err := New(ctx, WithAPIKey("dummy"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.client, err = genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:      "dummy",
+		Backend:     genai.BackendGeminiAPI,
+		HTTPOptions: genai.HTTPOptions{BaseURL: srv.URL},
+	})
+	if err != nil {
+		t.Fatalf("genai.NewClient: %v", err)
+	}
+	return p, &bodies
+}
+
+func generationConfig(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	cfg, ok := body["generationConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("request has no generationConfig: %v", body)
+	}
+	return cfg
+}
+
+func TestGemini_GenerateJSON_SendsSchema(t *testing.T) {
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"name": map[string]any{"type": "string"}},
+		"required":             []any{"name"},
+		"additionalProperties": false,
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		schema any
+	}{
+		{"map schema", schema},
+		{"raw message schema", json.RawMessage(raw)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, bodies := newTestProvider(t, `{"name":"grail"}`)
+			res, err := p.DoGenerate(context.Background(), grail.Request{
+				Inputs: []grail.Input{grail.InputText("name?")},
+				Output: grail.OutputJSON(tt.schema),
+			})
+			if err != nil {
+				t.Fatalf("DoGenerate: %v", err)
+			}
+			if len(*bodies) != 1 {
+				t.Fatalf("expected 1 request, got %d", len(*bodies))
+			}
+			cfg := generationConfig(t, (*bodies)[0])
+			if cfg["responseMimeType"] != "application/json" {
+				t.Errorf("responseMimeType = %v, want application/json", cfg["responseMimeType"])
+			}
+			if !reflect.DeepEqual(cfg["responseJsonSchema"], schema) {
+				t.Errorf("responseJsonSchema = %v, want %v", cfg["responseJsonSchema"], schema)
+			}
+			if _, ok := cfg["responseSchema"]; ok {
+				t.Errorf("responseSchema must be omitted when responseJsonSchema is set")
+			}
+			var got struct{ Name string }
+			if err := res.DecodeJSON(&got); err != nil || got.Name != "grail" {
+				t.Errorf("DecodeJSON = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestGemini_GenerateJSON_NilSchema(t *testing.T) {
+	p, bodies := newTestProvider(t, `{"ok":true}`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("hi")},
+		Output: grail.OutputJSON(nil),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	cfg := generationConfig(t, (*bodies)[0])
+	if cfg["responseMimeType"] != "application/json" {
+		t.Errorf("responseMimeType = %v, want application/json", cfg["responseMimeType"])
+	}
+	if _, ok := cfg["responseJsonSchema"]; ok {
+		t.Errorf("nil schema should not send responseJsonSchema: %v", cfg)
+	}
+}
+
+func TestGemini_GenerateJSON_MalformedOutput(t *testing.T) {
+	p, _ := newTestProvider(t, `{"name":`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("name?")},
+		Output: grail.OutputJSON(map[string]any{"type": "object"}),
+	})
+	if code := grail.GetErrorCode(err); code != grail.OutputInvalid {
+		t.Fatalf("error code = %q (%v), want %q", code, err, grail.OutputInvalid)
+	}
+}
+
+func TestGemini_GenerateJSON_NonObjectSchema(t *testing.T) {
+	p, bodies := newTestProvider(t, `{}`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("hi")},
+		Output: grail.OutputJSON("not a schema"),
+	})
+	if code := grail.GetErrorCode(err); code != grail.InvalidArgument {
+		t.Fatalf("error code = %q (%v), want %q", code, err, grail.InvalidArgument)
+	}
+	if len(*bodies) != 0 {
+		t.Fatalf("expected no request, got %d", len(*bodies))
+	}
 }

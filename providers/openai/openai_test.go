@@ -1,13 +1,21 @@
 package openai
 
 import (
+	"context"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/montanaflynn/grail"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 // Compile-time check that Provider implements grail.Provider.
@@ -191,4 +199,153 @@ func TestKnownModels_DeprecationRecords(t *testing.T) {
 		GPT5_4Nano.Name:    {shutdown: "2027-04-01", replacement: "gpt-6-luna"},
 		GPT4o.Name:         {shutdown: "2027-01-14", replacement: "gpt-6-luna"},
 	})
+}
+
+// newTestProvider returns a provider whose client talks to an httptest server
+// that records each request body and replies with a message containing text.
+func newTestProvider(t *testing.T, text string) (*Provider, *[]map[string]any) {
+	t.Helper()
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":     "resp_test",
+			"object": "response",
+			"status": "completed",
+			"output": []any{map[string]any{
+				"type":   "message",
+				"id":     "msg_test",
+				"role":   "assistant",
+				"status": "completed",
+				"content": []any{map[string]any{
+					"type":        "output_text",
+					"text":        text,
+					"annotations": []any{},
+				}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := New(WithAPIKey("dummy"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.client = openai.NewClient(option.WithAPIKey("dummy"), option.WithBaseURL(srv.URL), option.WithMaxRetries(0))
+	return p, &bodies
+}
+
+func textFormat(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	text, ok := body["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("request has no text config: %v", body)
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok {
+		t.Fatalf("request has no text.format: %v", text)
+	}
+	return format
+}
+
+func TestOpenAI_GenerateJSON_SendsSchema(t *testing.T) {
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"name": map[string]any{"type": "string"}},
+		"required":             []any{"name"},
+		"additionalProperties": false,
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		output     grail.Output
+		wantStrict bool
+	}{
+		{"map schema strict", grail.OutputJSON(schema), true},
+		{"raw message schema non-strict", grail.OutputJSON(json.RawMessage(raw), grail.WithStrictJSON(false)), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, bodies := newTestProvider(t, `{"name":"grail"}`)
+			res, err := p.DoGenerate(context.Background(), grail.Request{
+				Inputs: []grail.Input{grail.InputText("name?")},
+				Output: tt.output,
+			})
+			if err != nil {
+				t.Fatalf("DoGenerate: %v", err)
+			}
+			if len(*bodies) != 1 {
+				t.Fatalf("expected 1 request, got %d", len(*bodies))
+			}
+			format := textFormat(t, (*bodies)[0])
+			if format["type"] != "json_schema" {
+				t.Errorf("format type = %v, want json_schema", format["type"])
+			}
+			if name, _ := format["name"].(string); name == "" {
+				t.Errorf("format name missing: %v", format)
+			}
+			if format["strict"] != tt.wantStrict {
+				t.Errorf("format strict = %v, want %v", format["strict"], tt.wantStrict)
+			}
+			if !reflect.DeepEqual(format["schema"], schema) {
+				t.Errorf("format schema = %v, want %v", format["schema"], schema)
+			}
+			var got struct{ Name string }
+			if err := res.DecodeJSON(&got); err != nil || got.Name != "grail" {
+				t.Errorf("DecodeJSON = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestOpenAI_GenerateJSON_NilSchemaUsesJSONObject(t *testing.T) {
+	p, bodies := newTestProvider(t, `{"ok":true}`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("hi")},
+		Output: grail.OutputJSON(nil),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	format := textFormat(t, (*bodies)[0])
+	if format["type"] != "json_object" {
+		t.Errorf("format type = %v, want json_object", format["type"])
+	}
+	if _, ok := format["schema"]; ok {
+		t.Errorf("json_object format should not carry a schema: %v", format)
+	}
+}
+
+func TestOpenAI_GenerateJSON_MalformedOutput(t *testing.T) {
+	p, _ := newTestProvider(t, `{"name":`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("name?")},
+		Output: grail.OutputJSON(map[string]any{"type": "object"}),
+	})
+	if code := grail.GetErrorCode(err); code != grail.OutputInvalid {
+		t.Fatalf("error code = %q (%v), want %q", code, err, grail.OutputInvalid)
+	}
+}
+
+func TestOpenAI_GenerateJSON_NonObjectSchema(t *testing.T) {
+	p, bodies := newTestProvider(t, `{}`)
+	_, err := p.DoGenerate(context.Background(), grail.Request{
+		Inputs: []grail.Input{grail.InputText("hi")},
+		Output: grail.OutputJSON("not a schema"),
+	})
+	if code := grail.GetErrorCode(err); code != grail.InvalidArgument {
+		t.Fatalf("error code = %q (%v), want %q", code, err, grail.InvalidArgument)
+	}
+	if len(*bodies) != 0 {
+		t.Fatalf("expected no request, got %d", len(*bodies))
+	}
 }

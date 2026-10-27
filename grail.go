@@ -420,6 +420,15 @@ type jsonOutput struct {
 
 func (jsonOutput) isOutput() {}
 
+// OutputJSON requests JSON output matching schema. The schema is a JSON Schema
+// value: a map[string]any, a json.RawMessage, or anything that marshals to a
+// JSON Schema object. Providers pass it to their native structured-output APIs
+// so the response is constrained to match it. A nil schema means "any valid
+// JSON object".
+//
+// Strict output (the default, see WithStrictJSON) asks providers that support
+// it to enforce the schema exactly, and makes the provider return an
+// OutputInvalid error when the response does not parse as JSON.
 func OutputJSON(schema any, opts ...JSONOpt) Output {
 	jo := jsonOutput{
 		Schema: schema,
