@@ -22,6 +22,7 @@ package mock
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/montanaflynn/grail"
 )
@@ -70,4 +71,35 @@ func (m *CatalogProvider) ResolveModel(role grail.ModelRole, tier grail.ModelTie
 // ListModels implements grail.ModelLister.
 func (m *CatalogProvider) ListModels(ctx context.Context) ([]grail.Model, error) {
 	return m.Models, nil
+}
+
+// StreamProvider is a Provider that also streams text, for testing
+// grail.Client.Stream. StreamFn supplies each stream; TextStream builds one
+// from fixed chunks.
+type StreamProvider struct {
+	Provider
+	StreamFn func(ctx context.Context, req grail.Request) iter.Seq2[grail.StreamEvent, error]
+}
+
+// DoStream implements grail.StreamExecutor.
+func (m *StreamProvider) DoStream(ctx context.Context, req grail.Request) iter.Seq2[grail.StreamEvent, error] {
+	if m.StreamFn == nil {
+		return func(yield func(grail.StreamEvent, error) bool) {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, "mock StreamFn not set").WithProviderName(m.Name()))
+		}
+	}
+	return m.StreamFn(ctx, req)
+}
+
+// TextStream returns a stream that yields each chunk as a text delta, then a
+// final event carrying usage. It stops early if the consumer stops iterating.
+func TextStream(usage grail.Usage, chunks ...string) iter.Seq2[grail.StreamEvent, error] {
+	return func(yield func(grail.StreamEvent, error) bool) {
+		for _, chunk := range chunks {
+			if !yield(grail.StreamEvent{Text: chunk}, nil) {
+				return
+			}
+		}
+		yield(grail.StreamEvent{Done: true, Usage: usage}, nil)
+	}
 }

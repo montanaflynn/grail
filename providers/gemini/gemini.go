@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"os"
 	"strings"
@@ -372,7 +373,9 @@ func (c *Provider) DoGenerate(ctx context.Context, req grail.Request) (grail.Res
 	return grail.Response{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("unsupported output type: %T", req.Output)).WithProviderName("gemini")
 }
 
-func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []*genai.Part) (grail.Response, error) {
+// textConfig returns the model (Request.Model, else TextOptions.Model, else
+// the provider default) and the generation config for text output.
+func (c *Provider) textConfig(req grail.Request) (string, *genai.GenerateContentConfig) {
 	// Extract text options from provider options
 	var textOpts TextOptions
 	modelName := c.textModel
@@ -391,12 +394,17 @@ func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []
 		}
 	}
 
+	config := &genai.GenerateContentConfig{}
+	c.applyTextOptions(config, textOpts)
+	return modelName, config
+}
+
+func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []*genai.Part) (grail.Response, error) {
+	modelName, config := c.textConfig(req)
+
 	if c.log != nil {
 		c.log.Debug("generate text request", slog.String("model", modelName))
 	}
-
-	config := &genai.GenerateContentConfig{}
-	c.applyTextOptions(config, textOpts)
 
 	contents := []*genai.Content{
 		genai.NewContentFromParts(parts, genai.RoleUser),
@@ -429,6 +437,71 @@ func (c *Provider) generateText(ctx context.Context, req grail.Request, parts []
 		RequestID: "",
 		Warnings:  extractWarnings(resp),
 	}, nil
+}
+
+// DoStream implements grail.StreamExecutor using GenerateContentStream.
+// Only text output is supported.
+func (c *Provider) DoStream(ctx context.Context, req grail.Request) iter.Seq2[grail.StreamEvent, error] {
+	return func(yield func(grail.StreamEvent, error) bool) {
+		if !grail.IsTextOutput(req.Output) {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.Unsupported, fmt.Sprintf("gemini: streaming supports text output only, got %T", req.Output)).WithProviderName("gemini"))
+			return
+		}
+		parts, err := c.toGenAIParts(req.Inputs)
+		if err != nil {
+			yield(grail.StreamEvent{}, grail.NewGrailError(grail.InvalidArgument, fmt.Sprintf("failed to convert inputs: %v", err)).WithCause(err).WithProviderName("gemini"))
+			return
+		}
+		modelName, config := c.textConfig(req)
+
+		if c.log != nil {
+			c.log.Debug("stream text request", slog.String("model", modelName))
+		}
+
+		// Canceling the context releases the connection when the consumer
+		// stops early.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		contents := []*genai.Content{
+			genai.NewContentFromParts(parts, genai.RoleUser),
+		}
+
+		// Usage metadata is cumulative, so the last chunk that carries it
+		// has the totals.
+		var usage grail.Usage
+		var requestID string
+		for chunk, err := range c.client.Models.GenerateContentStream(ctx, modelName, contents, config) {
+			if err != nil {
+				yield(grail.StreamEvent{}, grail.NewGrailError(grail.Internal, fmt.Sprintf("stream text failed: %v", err)).WithCause(err).WithProviderName("gemini").WithRetryable(isRetryableError(err)))
+				return
+			}
+			if chunk.UsageMetadata != nil {
+				usage = extractUsage(chunk)
+			}
+			if chunk.ResponseID != "" {
+				requestID = chunk.ResponseID
+			}
+			if text := chunk.Text(); text != "" && !yield(grail.StreamEvent{Text: text}, nil) {
+				return
+			}
+		}
+
+		if c.log != nil {
+			c.log.Debug("stream text response", slog.Any("usage", usage))
+		}
+
+		yield(grail.StreamEvent{
+			Done:  true,
+			Usage: usage,
+			Provider: grail.ProviderInfo{
+				Name:   "gemini",
+				Route:  "generate_content",
+				Models: []grail.ModelUse{{Role: "language", Name: modelName}},
+			},
+			RequestID: requestID,
+		}, nil)
+	}
 }
 
 func (c *Provider) generateImage(ctx context.Context, req grail.Request, parts []*genai.Part, spec grail.ImageSpec) (grail.Response, error) {
@@ -603,8 +676,7 @@ func (c *Provider) toGenAIParts(inputs []grail.Input) ([]*genai.Part, error) {
 			continue
 		}
 
-		// FileReaderInput - read into memory for now
-		// TODO: support streaming if Gemini API supports it
+		// FileReaderInput - not supported yet
 		return nil, fmt.Errorf("input %d: FileReaderInput not yet supported", i)
 	}
 	return out, nil

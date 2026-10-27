@@ -11,3 +11,6 @@ var (
 	_ grail.ModelResolver    = (*CatalogProvider)(nil)
 	_ grail.ModelLister      = (*CatalogProvider)(nil)
 )
+
+// Compile-time check that StreamProvider can stream.
+var _ grail.StreamExecutor = (*StreamProvider)(nil)
