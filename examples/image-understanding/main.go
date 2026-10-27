@@ -125,7 +125,7 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client, img)
 }
 
-func generateText(ctx context.Context, client grail.Client, img []byte) (string, error) {
+func generateText(ctx context.Context, client *grail.Client, img []byte) (string, error) {
 	res, err := client.Generate(ctx, grail.Request{
 		Inputs: []grail.Input{
 			grail.InputText("Describe the style of this image."),

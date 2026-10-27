@@ -118,7 +118,7 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateText(ctx, client)
 }
 
-func generateText(ctx context.Context, client grail.Client) (string, error) {
+func generateText(ctx context.Context, client *grail.Client) (string, error) {
 	res, err := client.Generate(ctx, grail.Request{
 		Inputs: []grail.Input{
 			grail.InputText("Explain how AI works in a few words"),

@@ -160,7 +160,7 @@ func generateWithProvider(ctx context.Context, logger *slog.Logger, providerName
 	return generateImage(ctx, client, pdfData, filename)
 }
 
-func generateImage(ctx context.Context, client grail.Client, pdfData []byte, filename string) ([]grail.ImageOutputInfo, error) {
+func generateImage(ctx context.Context, client *grail.Client, pdfData []byte, filename string) ([]grail.ImageOutputInfo, error) {
 	pdfInput := grail.InputPDF(pdfData, grail.WithFileName(filename))
 
 	res, err := client.Generate(ctx, grail.Request{
