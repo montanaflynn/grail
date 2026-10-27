@@ -17,7 +17,7 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gemini-3.1-pro-preview
+//   - Text: gemini-4-argon
 //   - Image: gemini-3-pro-image
 package gemini
 
@@ -37,7 +37,7 @@ import (
 
 const (
 	// DefaultTextModelName is the Gemini text model used when no override is provided.
-	DefaultTextModelName = "gemini-3.1-pro-preview"
+	DefaultTextModelName = "gemini-4-argon"
 	// DefaultImageModelName is the Gemini image model used when no override is provided.
 	DefaultImageModelName = "gemini-3-pro-image"
 )
@@ -255,10 +255,10 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 		imageModel: cfg.imageModel,
 		log:        cfg.logger,
 		// Initialize model catalog with defaults
-		bestTextModel:  Gemini3_1Pro,
-		fastTextModel:  Gemini3_5Flash,
+		bestTextModel:  Gemini4Argon,
+		fastTextModel:  Gemini3_8Flash,
 		bestImageModel: Gemini3ProImage,
-		fastImageModel: Gemini3_1FlashImage,
+		fastImageModel: GeminiNanoBanana2_1,
 	}, nil
 }
 
@@ -308,8 +308,11 @@ func (c *Provider) AllModels() []grail.Model {
 		c.bestImageModel,
 		c.fastImageModel,
 		// Additional models not set as best/fast
+		Gemini3_1Pro,
+		Gemini3_6Flash,
+		Gemini3_5FlashLite,
 		Gemini3_1FlashLite,
-		Gemini3Flash,
+		Gemini3_1FlashLiteImage,
 		Gemini25Flash,
 		Gemini25FlashLite,
 	}

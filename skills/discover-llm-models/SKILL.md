@@ -45,8 +45,10 @@ go doc -all github.com/openai/openai-go/v3 | rg 'ImageModel'
 ```
 
 Key packages:
-- `shared.ChatModel*` — text models (current frontier: `ChatModelGPT5_4` → `gpt-5.4`)
-- `openai.ImageModel*` — image models (current: `ImageModelGPTImage2` → `gpt-image-2`)
+- `shared.ChatModel*` — text models (current frontier: `ChatModelGPT6Astra` → `gpt-6-astra`; fast: `ChatModelGPT6Luna` → `gpt-6-luna`)
+- `openai.ImageModel*` — image models (current: `ImageModelGPTImage2_5Sunburst` → `gpt-image-2.5-sunburst`; fast: `ImageModelGPTImage2_5Flare` → `gpt-image-2.5-flare`)
+
+SDK constants carry `// Deprecated: Announced shutdown date: ...` comments — grep for them to find pinned models that are going away.
 
 When adding a model to grail, prefer SDK constants over raw strings so upgrades surface missing IDs at compile time.
 
@@ -61,13 +63,13 @@ for _, m := range page.Data {
 }
 ```
 
-`client.Models.List` maps to `GET /v1/models`. Use this to find models announced in docs but not yet added to SDK constants (e.g. check for `gpt-5.5` before the Go SDK ships `ChatModelGPT5_5`).
+`client.Models.List` maps to `GET /v1/models`. Use this to find models announced in docs but not yet added to SDK constants (e.g. check for a new ID before the Go SDK ships its constant).
 
 ### Docs to monitor
 
 - Models catalog: https://developers.openai.com/api/docs/models
 - Compare page: https://developers.openai.com/api/docs/models/compare
-- Image models: https://developers.openai.com/api/docs/models/gpt-image-2
+- Deprecations (shutdown dates + replacements): https://developers.openai.com/api/docs/deprecations
 
 ### grail update checklist (OpenAI)
 
@@ -93,7 +95,7 @@ if err != nil { /* handle */ }
 
 for model, err := range client.Models.All(ctx) {
     if err != nil { /* handle */ }
-  // model.Name is like "models/gemini-3.5-flash"
+  // model.Name is like "models/gemini-3.8-flash"
   fmt.Println(model.Name, model.DisplayName, model.SupportedActions)
 }
 ```
@@ -104,21 +106,26 @@ Filter listed models to those with `generateContent` or `generateImages` in `Sup
 
 ### Docs to monitor
 
-- Gemini 3 guide (current lineup): https://ai.google.dev/gemini-api/docs/gemini-3
 - Release notes (deprecations + GA renames): https://ai.google.dev/gemini-api/docs/changelog
 - Per-model pages: https://ai.google.dev/gemini-api/docs/models
 
-### Recent migration patterns (as of mid-2026)
+### Recent migration patterns (as of late October 2026)
 
 | Old (preview/shut down) | New (GA) | Notes |
 |-------------------------|----------|-------|
 | `gemini-3-pro-image-preview` | `gemini-3-pro-image` | Shut down 2026-06-25 |
 | `gemini-3.1-flash-image-preview` | `gemini-3.1-flash-image` | Shut down 2026-06-25 |
 | `gemini-3.1-flash-lite-preview` | `gemini-3.1-flash-lite` | Shut down 2026-05-25 |
-| `gemini-3-flash-preview` | `gemini-3.5-flash` | 3.5 Flash is GA fast tier |
+| `gemini-3.5-flash` | `gemini-3.8-flash` | Deprecated 2026-10-08, routes to `gemini-3.6-flash` |
+| `gemini-3.7-flash` | `gemini-3.8-flash` | Deprecated 2026-10-08 |
+| `gemini-3.1-flash-image` | `gemini-nano-banana-2.1` | Deprecated 2026-10-06, no shutdown date yet |
+| `gemini-3.1-pro-preview` | `gemini-4-argon` | 4 Argon is the GA flagship (2026-10-13) |
+| `gemini-3-flash-preview` | `gemini-3.8-flash` | Superseded preview |
 | `gemini-3-pro-preview` | `gemini-3.1-pro-preview` | Shut down 2026-03-09 |
 
 Keep deprecated preview IDs as legacy constants (see `Gemini3Pro`, `Gemini3ProImagePreview`) so existing callers pinning old names get compile-time symbols, but do not use them as defaults.
+
+Note: Gemini deprecated the `temperature`, `top_p`, and `top_k` parameters on 2026-07-21. grail still passes them through from `TextOptions` when callers set them.
 
 ### grail update checklist (Gemini)
 
@@ -145,7 +152,8 @@ go get github.com/openai/openai-go/v3@latest google.golang.org/genai@latest
 go mod tidy
 
 # 2. Print OpenAI SDK model constants
-go doc -all github.com/openai/openai-go/v3/shared | rg 'ChatModelGPT|ImageModel'
+go doc -all github.com/openai/openai-go/v3/shared | rg 'ChatModelGPT'
+go doc -all github.com/openai/openai-go/v3 | rg 'ImageModel'
 
 # 3. Compare with grail constants
 rg 'Name:|DefaultTextModelName|DefaultImageModelName' providers/openai providers/gemini

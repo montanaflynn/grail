@@ -17,13 +17,14 @@
 // if no API key is explicitly provided via WithAPIKey or WithAPIKeyFromEnv.
 //
 // Default models:
-//   - Text: gpt-5.4
-//   - Image: gpt-image-2
+//   - Text: gpt-6-astra
+//   - Image: gpt-image-2.5-sunburst
 //
 // Available image models:
-//   - gpt-image-2 (default)
-//   - gpt-image-1
-//   - gpt-image-1-mini
+//   - gpt-image-2.5-sunburst (default)
+//   - gpt-image-2.5-flare
+//   - gpt-image-2
+//   - gpt-image-1-mini (deprecated, shuts down 2026-12-01)
 package openai
 
 import (
@@ -48,9 +49,9 @@ import (
 
 const (
 	// DefaultTextModelName is the OpenAI text model used when no override is provided.
-	DefaultTextModelName = shared.ChatModelGPT5_4
+	DefaultTextModelName = shared.ChatModelGPT6Astra
 	// DefaultImageModelName is the OpenAI image model used when no override is provided.
-	DefaultImageModelName = openai.ImageModelGPTImage2
+	DefaultImageModelName = openai.ImageModelGPTImage2_5Sunburst
 )
 
 var (
@@ -88,13 +89,13 @@ func WithAPIKeyFromEnv(env string) Option {
 	}
 }
 
-// WithTextModel overrides the default text model (default: gpt-5.4).
+// WithTextModel overrides the default text model (default: gpt-6-astra).
 func WithTextModel(model string) Option {
 	return func(s *settings) { s.textModel = model }
 }
 
-// WithImageModel overrides the default image model (default: gpt-image-2).
-// Available models: gpt-image-2, gpt-image-1, gpt-image-1-mini
+// WithImageModel overrides the default image model (default: gpt-image-2.5-sunburst).
+// Available models: gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2
 func WithImageModel(model string) Option {
 	return func(s *settings) { s.imageModel = model }
 }
@@ -329,10 +330,10 @@ func New(opts ...Option) (*Provider, error) {
 		log:        cfg.logger,
 		imgFormat:  cfg.imgFormat,
 		// Initialize model catalog with defaults
-		bestTextModel:  GPT5_4,
-		fastTextModel:  GPT5_4Mini,
-		bestImageModel: GPTImage2,
-		fastImageModel: GPTImage1Mini,
+		bestTextModel:  GPT6Astra,
+		fastTextModel:  GPT6Luna,
+		bestImageModel: GPTImage2_5Sunburst,
+		fastImageModel: GPTImage2_5Flare,
 	}, nil
 }
 
@@ -381,6 +382,10 @@ func (p *Provider) AllModels() []grail.Model {
 		p.fastTextModel,
 		p.bestImageModel,
 		p.fastImageModel,
+		// Additional models not set as best/fast
+		GPT6_1Sol,
+		GPT6_1Terra,
+		GPTImage2,
 	}
 }
 
