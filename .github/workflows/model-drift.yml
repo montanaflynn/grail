@@ -1,0 +1,112 @@
+name: Model drift
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: model-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Diff live models against grail catalog
+        id: diff
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          providers=""
+          [ -n "$OPENAI_API_KEY" ] && providers="$providers,openai"
+          [ -n "$GEMINI_API_KEY" ] && providers="$providers,gemini"
+          [ -n "$ANTHROPIC_API_KEY" ] && providers="$providers,anthropic"
+          providers="${providers#,}"
+          if [ -z "$providers" ]; then
+            echo "::notice::No provider API key secrets are set; skipping drift check."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Checking: $providers"
+
+          go build -o "$RUNNER_TEMP/listmodels" ./skills/discover-llm-models/cmd/listmodels
+          set +e
+          "$RUNNER_TEMP/listmodels" -diff -provider "$providers" > "$RUNNER_TEMP/drift.md"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/drift.md"
+
+          # Exit 0 = no missing models, 1 = missing models; anything else is a
+          # listing error, so leave the issue untouched and fail the job.
+          if [ "$code" -gt 1 ]; then
+            echo "::error::listmodels failed with exit code $code"
+            exit "$code"
+          fi
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "providers=$providers" >> "$GITHUB_OUTPUT"
+          # Each drifted model is printed as a "- " list item.
+          if grep -q '^- ' "$RUNNER_TEMP/drift.md"; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create, update or close the model-drift issue
+        if: steps.diff.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT: ${{ steps.diff.outputs.drift }}
+          PROVIDERS: ${{ steps.diff.outputs.providers }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create model-drift --color D93F0B \
+            --description "Provider model catalog drifted from grail's KnownModels()" 2>/dev/null || true
+
+          issue=$(gh issue list --label model-drift --state open --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ "$DRIFT" = "true" ]; then
+            {
+              echo "The nightly model drift check found differences between live provider model lists and grail's \`KnownModels()\`."
+              echo
+              echo "Providers checked: \`$PROVIDERS\`. Last run: $RUN_URL"
+              echo
+              cat "$RUNNER_TEMP/drift.md"
+              echo "To act on this issue, follow the nightly drift section of \`skills/discover-llm-models/SKILL.md\`. It closes automatically once the next run finds no drift."
+            } > "$RUNNER_TEMP/body.md"
+
+            if [ -n "$issue" ]; then
+              gh issue edit "$issue" --body-file "$RUNNER_TEMP/body.md"
+              echo "Updated issue #$issue"
+            else
+              gh issue create --title "Model catalog drift" --label model-drift --body-file "$RUNNER_TEMP/body.md"
+            fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Drift cleared as of $RUN_URL (providers checked: \`$PROVIDERS\`)."
+            echo "Closed issue #$issue"
+          else
+            echo "No drift and no open issue."
+          fi
+
+      - name: Fail on missing models
+        if: steps.diff.outputs.code == '1'
+        run: |
+          echo "::error::Known or default/tier models are missing from provider APIs; see the model-drift issue."
+          exit 1
