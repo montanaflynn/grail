@@ -3,7 +3,7 @@ module github.com/montanaflynn/grail
 go 1.26.0
 
 require (
-	github.com/openai/openai-go/v3 v3.89.0
+	github.com/openai/openai-go/v3 v3.91.1
 	google.golang.org/genai v1.76.0
 )
 
