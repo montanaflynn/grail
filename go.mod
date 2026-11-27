@@ -3,7 +3,7 @@ module github.com/montanaflynn/grail
 go 1.26.0
 
 require (
-	github.com/openai/openai-go/v3 v3.89.0
+	github.com/openai/openai-go/v3 v3.106.0
 	google.golang.org/genai v1.76.0
 )
 
@@ -21,7 +21,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.24 // indirect
 	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/tidwall/gjson v1.20.0 // indirect
+	github.com/tidwall/gjson v1.20.1 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.2 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
